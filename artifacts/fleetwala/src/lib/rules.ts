@@ -1,0 +1,57 @@
+/** Pure pilot rules. No browser or env access so they run under node:test. */
+import type { Application, Job, WorkerProfile } from './types';
+
+export const DAILY_LIMIT = 20;
+export const DEFAULT_RADIUS_KM = 15;
+
+/** YYYY-MM-DD in Asia/Kolkata. */
+export function istDay(d: Date | string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(d));
+}
+
+/** Applications by a candidate created on the same IST calendar day as `now`. */
+export function countToday(apps: Pick<Application, 'candidate_id' | 'created_at'>[], candidateId: string, now: Date = new Date()): number {
+  const day = istDay(now);
+  return apps.filter((a) => a.candidate_id === candidateId && istDay(a.created_at) === day).length;
+}
+
+export function canApplyToday(used: number, limit = DAILY_LIMIT): boolean {
+  return used < limit;
+}
+
+/** A job is live for workers only if approved and not expired. */
+export function isLiveJob(j: Pick<Job, 'status' | 'expires_at'>, now: Date = new Date()): boolean {
+  return j.status === 'approved' && new Date(j.expires_at).getTime() > now.getTime();
+}
+
+export function liveJobs<T extends Pick<Job, 'status' | 'expires_at'>>(jobs: T[], now: Date = new Date()): T[] {
+  return jobs.filter((j) => isLiveJob(j, now));
+}
+
+/** New worker profiles are never discoverable unless the worker opts in. */
+export function defaultProfile(overrides: Partial<WorkerProfile> = {}): WorkerProfile {
+  return {
+    first_name: '', city: '', area: '', experience: '', vehicle: '',
+    own_vehicle: false, available: true, ...overrides, discoverable: overrides.discoverable === true,
+  };
+}
+
+export const INDIAN_MOBILE = /^[6-9]\d{9}$/;
+/** Returns +91XXXXXXXXXX or null. Accepts spaces, dashes, leading 0, 91 or +91. */
+export function normalizeIndianPhone(input: string): string | null {
+  const d = input.replace(/\D/g, '');
+  let local = d;
+  if (d.length === 12 && d.startsWith('91')) local = d.slice(2);
+  else if (d.length === 11 && d.startsWith('0')) local = d.slice(1);
+  return INDIAN_MOBILE.test(local) ? `+91${local}` : null;
+}
+
+/** Live portal data is blocked until a real integration is wired, whatever the flags say. */
+export const LIVE_PORTAL_WIRED = false;
+export function liveGate(opts: { enableFlag: boolean; supabaseConfigured: boolean; wired?: boolean }) {
+  const requested = opts.enableFlag && opts.supabaseConfigured;
+  const wired = opts.wired ?? LIVE_PORTAL_WIRED;
+  return { requested, showLiveData: requested && wired, blocked: requested && !wired };
+}

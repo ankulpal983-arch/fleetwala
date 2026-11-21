@@ -1,0 +1,5 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <rect x="3" y="3" width="58" height="58" rx="8" fill="#ffcf26" stroke="#19213c" stroke-width="4"/>
+  <path d="M10 5h7v54h-7z" fill="#19213c"/>
+  <text x="22" y="39" font-family="sans-serif" font-size="21" font-weight="700" fill="#19213c">FW</text>
+</svg>

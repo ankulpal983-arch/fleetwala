@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "FleetWala"
+description = "India-first logistics hiring platform with worker job discovery, employer recruitment tools and a trust and moderation portal. Supabase-backed production setup with a clearly labelled pilot preview until configured."
+version = "1.0.0"
+id = "artifacts/fleetwala"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18577
+
+[services.development]
+run = "pnpm --filter @workspace/fleetwala run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/fleetwala", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/fleetwala/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18577"
+BASE_PATH = "/"
