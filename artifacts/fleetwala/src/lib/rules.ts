@@ -1,5 +1,5 @@
 /** Pure pilot rules. No browser or env access so they run under node:test. */
-import type { Application, Job, WorkerProfile } from './types';
+import type { AppStatus, Application, Job, WorkerProfile } from './types';
 
 export const DAILY_LIMIT = 20;
 export const DEFAULT_RADIUS_KM = 15;
@@ -54,4 +54,42 @@ export function liveGate(opts: { enableFlag: boolean; supabaseConfigured: boolea
   const requested = opts.enableFlag && opts.supabaseConfigured;
   const wired = opts.wired ?? LIVE_PORTAL_WIRED;
   return { requested, showLiveData: requested && wired, blocked: requested && !wired };
+}
+
+/** Allowed state transitions for applications */
+export function isValidAppStatusTransition(current: AppStatus, next: AppStatus): boolean {
+  if (current === next) return true;
+  if (current === 'withdrawn' || current === 'rejected' || current === 'hired') return false;
+  const allowed: Record<AppStatus, AppStatus[]> = {
+    applied: ['viewed', 'shortlisted', 'rejected', 'withdrawn'],
+    viewed: ['shortlisted', 'rejected', 'withdrawn'],
+    shortlisted: ['hired', 'rejected', 'withdrawn'],
+    hired: [],
+    rejected: [],
+    withdrawn: [],
+  };
+  return allowed[current]?.includes(next) ?? false;
+}
+
+/** Detect prohibited worker deposits or fee demands */
+export function hasProhibitedFee(text: string): boolean {
+  return /(deposit|registration fee|pay to join|security amount|joining fee)/i.test(text);
+}
+
+/** Validate salary bounds */
+export function isValidSalaryRange(min: number, max: number): boolean {
+  return min > 0 && max >= min;
+}
+
+/** Candidate preview projection: strictly non-identifying */
+export function anonymizedCandidateProjection(worker: WorkerProfile): Pick<WorkerProfile, 'first_name' | 'city' | 'area' | 'experience' | 'vehicle' | 'own_vehicle' | 'available'> {
+  return {
+    first_name: worker.first_name,
+    city: worker.city,
+    area: worker.area,
+    experience: worker.experience,
+    vehicle: worker.vehicle,
+    own_vehicle: worker.own_vehicle,
+    available: worker.available,
+  };
 }

@@ -1,0 +1,182 @@
+FLEETWALA — SINGLE MASTER PROMPT FOR REPLIT AGENT
+FULL END-TO-END, MULTI-AGENT, PHASE-BY-PHASE WEB SAAS BUILD
+Version: 2.0 | Source baseline: FleetWala PRD dated 12 November 2026
+
+YOUR MISSION
+You are the lead autonomous development orchestrator inside Replit. Build and test a complete, production-oriented, India-first FleetWala responsive WEB SaaS for three surfaces: Worker Portal, Employer Portal, and Role-Protected Admin Panel, all backed by one Supabase project. The owner wants ONE master prompt, not a sequence of prompts. Execute the entire project phase by phase, using specialist agents where Replit supports them; otherwise simulate specialist roles as clearly identified, sequential reviews. Do not falsely claim that independent agents exist or ran. Your responsibility includes planning, design, coding, generating separately numbered SQL migration files, executing safe staging migrations (only with valid owner-provided credentials), automated tests, security verification, responsive QA, and deployment readiness. Never mark something done simply because code was written.
+
+MANDATORY FIRST INPUT
+1. Read the uploaded original document: FleetWala_Full_Product_Requirements_Document_PRD.pdf (14 pages, 12 Nov 2026). If it is not available in your Replit workspace, immediately tell the owner to upload it before claiming you reconciled it. You may continue safe scaffolding based on the specifications below, but label any original-PRD comparisons UNVERIFIED until you have read the PDF.
+2. Inspect every existing file in this Replit repository before modifying it. Identify any existing React + Vite prototype, its reusable design elements, and conflicting code. Preserve existing user assets, avoid destructive resets, and back up or branch before significant changes. The original PRD says the earlier prototype was React + Vite, not a native Expo application.
+3. This new instruction SUPERSEDES two original PRD decisions: (a) use SUPABASE AUTH, NOT CLERK, for all roles; (b) build a responsive browser-based WEB SAAS now, NOT an Expo native worker app. Do not leave Clerk packages, references, environment keys, or dual-auth logic. Preserve all other business rules unless there is an explicitly documented newer decision or a genuine technical/legal blocker.
+4. Employer/admin were labeled 'future' in the original MVP. For this end-to-end web SaaS, prepare and implement all three role-based surfaces in phased development. Stage potentially chargeable or operationally risky integrations behind feature flags until the owner provides credentials/approval. Mark unconfirmed choices clearly; do not pretend original PRD approved them.
+
+WORK METHOD: MULTIPLE SPECIALIST AGENTS WITH ONE ORCHESTRATOR
+Assign the following specialties to actual subagents if available. If not available, perform explicitly distinct review passes yourself. Do not fabricate agent executions.
+- Agent 01 — Product Owner / Business Analyst: PRD traceability, business-rule ambiguities, screen inventory, acceptance criteria, decision register.
+- Agent 02 — Solution Architect: Next.js architecture, data flows, server/client boundaries, cross-role permissions and resilience.
+- Agent 03 — UX/UI Designer: premium mobile-first Indian SaaS experience, accessible components, responsive states, intuitive navigation.
+- Agent 04 — Supabase Auth Specialist: real phone OTP, employer/admin auth, session lifecycle, identity ownership, email/SMS provider setup.
+- Agent 05 — Database/PostgreSQL Engineer: normalized data, table constraints, migrations, indexes, row-level security and transaction safety.
+- Agent 06 — Worker Portal Engineer: worker registration, onboarding, discovery, saved jobs, applications, profile, privacy.
+- Agent 07 — Employer Portal Engineer: employer organizations, staff seats, job workflows, applicant management, candidate previews.
+- Agent 08 — Admin/Trust Engineer: approvals, moderation, verification, audits, disputes, account blocking.
+- Agent 09 — Payments & Messaging Engineer: payment sandbox/webhooks, contact unlock, authorized text chat and notifications.
+- Agent 10 — QA Automation Engineer: unit, integration, database, security, browser E2E, regression and concurrency tests.
+- Agent 11 — DevOps/Release Engineer: Replit configuration, secrets, deployment, environment isolation, logging, runbooks.
+- Agent 12 — Independent Security/Red Team Reviewer: adversarial authorization, PII leaks, privilege escalation and payment abuse tests.
+After each phase obtain a short verdict from every relevant role: PASS / BLOCKED / NOT TESTED, with evidence. No fabricated execution.
+
+FIXED ARCHITECTURE
+- Frontend/full stack: Next.js App Router + TypeScript, Tailwind CSS and accessible, reusable UI components. Responsive mobile browser, tablet and desktop; no native Expo code.
+- Backend: Next.js server components/actions/route handlers for trusted boundaries as appropriate, backed by Supabase PostgreSQL. Use runtime-compatible official, currently maintained Supabase JS and SSR session APIs; check actual documentation and installed versions, do not guess obsolete packages.
+- Authentication: exclusively SUPABASE AUTH. Support real Indian phone-number OTP for worker login, with compliant SMS gateway/provider configuration. Employer auth and admin auth must be secure; propose email magic link or email/password + MFA for privileged roles pending owner confirmation, and never automatically make an arbitrary public user an admin. OTP must NEVER use a static production bypass, such as 123456.
+- Database: Supabase Postgres, RLS on every client-exposed table/view where appropriate, minimal grants, all business-critical writes server-enforced. PostGIS optional for accurate radius search, only if extension setup is available and verified. Index common searches.
+- Storage: Supabase Storage private buckets for profile documents; enforce type, size, ownership, signed access and server authorization.
+- Realtime: Supabase Realtime only for authorized notifications and chat, with permissions revalidated. Start with ordinary polling where realtime security is not fully verified.
+- Payments: Indian gateway to be approved by owner (e.g. Razorpay or Cashfree, NO implicit selection); INR currency, secure signed webhooks, sandbox first, never trust frontend payment success alone.
+- Hosting: Replit for development/application deployment with configuration for secure production domain; Supabase hosts backend. Never assume Replit previews equal a production launch.
+- Environment keys: NEXT_PUBLIC_SUPABASE_URL and appropriate public Supabase publishable/anon key may be browser-exposed. Database password, payment webhook secret, SMS credentials and Supabase server secret/service-role key are SERVER-ONLY secrets. Never print or commit real keys. Create .env.example with placeholder descriptions; never put secrets in NEXT_PUBLIC variables.
+- Prefer strict TypeScript, input validation, centralized error reporting, pagination, audit trails and idempotent critical operations. Use supported libraries, document exact versions and breaking changes verified during build.
+
+ORIGINAL PRD BUSINESS RULES THAT MUST REMAIN INTACT
+1. FleetWala serves India-focused last-mile logistics/delivery hiring, not a general job portal. Relevant roles include delivery, pickup/drop, warehouse and hub.
+2. Worker applies for free; enforce MAXIMUM 20 applications per worker per Asia/Kolkata local calendar day. 20th is permitted, 21st is refused, even with simultaneous requests, retries or different browser tabs. Count policy for withdrawn applications needs documented owner decision; safe default: all successfully created applications count for that calendar day.
+3. LIVE job visibility: show only published, approved, non-expired, non-paused, non-closed jobs. Server must recheck job eligibility at moment of applying. New/untrusted employer jobs require admin review; trust-based auto-approval, if implemented, requires an explicit audited rule.
+4. Nearby jobs default to 15 km. Provide radius controls, search and filters. GPS access is consent-based; manual city/area/pincode fallback works without GPS. If exact distance cannot be determined, clearly label approximate/city-based matching and do not fake kilometers.
+5. Worker discoverability is OFF by default. Only explicit opt-in makes anonymized worker preview eligible for employer candidate discovery. Toggling off must immediately suppress new discovery, subject to separate policy for prior applications/authorized conversations.
+6. Employer preview before payment/contact authorization must exclude name, photo, phone, WhatsApp, email, precise address, and any other identifying fields. A worker applying to a job does NOT automatically reveal their phone number.
+7. Aadhaar is NOT a standard profile requirement; optional documents must be private. Driving licence is optional for worker onboarding; an individual job may require it.
+8. In-app chat is text-only, authorized AFTER shortlisting or explicit approved authorization. No voice/video calling, no AI matching/AI assistant, no salary disbursement, no escrow, no payroll or attendance in initial scope.
+9. Employer account types: Company, Vendor/DSP, Recruitment Agency, Recruiter (recruiter may be a staff member tied to employer organization; clarify data taxonomy without creating uncontrolled access).
+10. Future monetization as stated in PRD: INR 99 per job posting, INR 10 per candidate contact unlock; never charge the same employer/worker pair twice for that unlock. Use a configurable pricing table and feature flag; no collection of real money until gateway selection, legal/business approval and successful tests.
+11. Failed, pending, forged, mismatched or duplicate/replayed payments MUST NEVER grant a job publishing entitlement or reveal worker contact. Admin review before refund/replacement for invalid-contact disputes.
+12. English UI is the original baseline; Hindi + English is an OPEN decision. Design localization-ready strings, do not claim Hindi is approved by PRD.
+13. Worker UX includes splash/onboarding, OTP screens, profile setup/edit, jobs feed, search/filters, job details, save/unsave, application confirmation, My Applications/status timeline, notifications, privacy controls, settings, support and logout.
+14. Every screen needs loading, empty, error, offline/retry and permission-denied states. Work on Indian mobile networks; paginate and optimize.
+
+USER ROLES, TENANCY AND ACCESS CONTROL
+- Anonymous visitor: marketing/landing and access to sign-up/log-in; NO access to employer-only job browser, restricted candidate previews or private data. Decide public job visibility consistently with original PRD and document it. Worker after authentication can see approved LIVE jobs.
+- Worker: owns worker profile, preferences, saved jobs, applications, personal documents, notifications and participant messages. Cannot change its role, self-approve jobs, grant contact access or read another worker's private rows.
+- Employer owner/manager/recruiter: membership in an employer organization with properly scoped permissions; may access only organization-owned jobs, organization applicants and explicitly authorized/correctly unlocked contact data. Never trust arbitrary employer_id supplied by browser.
+- Admin: special allowlisted/provisioned principal or server-validated admin membership; strict server-side controls with audited changes. Never use a client-editable profile field or user_metadata to promote admin roles.
+- Suspended/blocked employer: cannot post, publish, buy unlocks or access unauthorized sensitive functions; revoked sessions and existing entitlements need clearly documented policy.
+- Enforce least privilege BOTH in Next.js server endpoints AND Supabase RLS/DB functions. Test direct REST/RPC requests, not only UI navigation.
+
+DATABASE AND SQL ARTIFACT CONTRACT — REPLIT MUST GENERATE FILES
+Create actual, individually named PostgreSQL SQL migration files in supabase/migrations/ or database/sql/. Do not provide just one giant SQL blob. Use ordered, idempotence-aware migrations where feasible, and create README with precise application order, prerequisites, rollback/backup limitations, staging verification and production change policy. Proposed minimum grouping:
+01_extensions_and_enums.sql — necessary extensions, enums/domains, roles/status choices.
+02_auth_profiles_and_roles.sql — Supabase auth.users-linked private profiles, worker accounts, organizations, organization memberships, admin role handling.
+03_worker_profiles_and_preferences.sql — worker profile, skills, vehicles, privacy, consent and availability.
+04_jobs_and_moderation.sql — employer jobs, locations, approval, trust flags, reviews/status history.
+05_applications_saved_jobs.sql — applications, statuses/history, uniqueness, saved jobs, daily-limit primitives.
+06_notifications_chat.sql — notification records, conversations, participants, messages and authorized history.
+07_storage_metadata.sql — private document metadata and storage bucket/policy setup, if applicable.
+08_billing_and_unlocks.sql — payment orders, attempts, verified events, invoices/entitlements/contact unlocks, refunds/disputes (feature-gated).
+09_audit_and_support.sql — security audit log, employer verification, user reports and support tickets.
+10_indexes_triggers_and_functions.sql — all indexes, triggers, trusted RPC/atomic transactions, timestamps, concurrency locks and relevant grants.
+11_rls_policies.sql — RLS and grants for EVERY client-exposed table; restrictive policies; explicit WITH CHECK as needed.
+12_views_and_safe_discovery.sql — anonymized worker discovery; avoid bypass-prone views, force safe security semantics, explicitly deny direct identifying columns.
+13_test_fixtures_staging_only.sql — fake seeded staging-only employers/workers/jobs; disabled by default for production and no fake live worker contact data.
+14_database_verification.sql — tests/checks for tables/indexes/RLS/grants/constraints; safe read-only diagnostics where possible.
+15_data_retention_and_cleanup.sql — deletion/export/retention procedures only after owner decision; prevent irreversible automated destructive operations.
+Each file must explain prerequisites and expected effect. You MAY choose a different ordering to satisfy foreign-key/function dependencies, but document exact runnable order and no-op/re-run behavior. Generate database schema diagrams and a table/column dictionary. The original PRD lists workers, jobs, job_applications, saved_jobs, notifications, conversations, conversation_participants, messages, worker_documents, employers, payments and contact_unlocks; adapt their IDs and identity links to Supabase Auth rather than Clerk. Use auth.uid() where appropriate, do not rely on Clerk identifiers. Add required organizational membership/status history/audit structures as a clearly labeled engineering extension to PRD.
+CRITICAL: Creating SQL files is not executing them. Never claim SQL is proven until run on actual disposable/staging Supabase DB with results. Never run destructive SQL in an existing production project without explicit owner authorization and a verified backup. Never ask the owner to paste SQL containing unsafe unknown data erasure. Include an alternative manual SQL Editor execution walkthrough if automated migration access is unavailable.
+
+SECURITY-CRITICAL ENGINEERING DETAILS
+- Worker daily cap must be atomic at the DB transaction boundary, not enforced by frontend count. Use safe locking/unique strategy and verify high-concurrency race conditions. Define exactly what constitutes IST date using timezone conversion and test around midnight, plus duplicate requests and retries.
+- Distinguish no duplicate per worker-job vs 'duplicate active application' in original PRD: by default enforce one immutable application per worker/job until owner approves reapplication policy; record this as a proposal.
+- Prevent spoofed job status, payment status, employer membership, document ownership, admin status and candidate unlock entitlement.
+- Audit admin actions, approvals/rejections, trust state changes, contact reveals, payment reconciliation, support decisions. Mask personal details in logs.
+- Validate user inputs and file uploads: length, format, MIME, content, size, rate limits; protect against XSS, CSRF where relevant, IDOR/BOLA, mass assignment, insecure redirects, brute-force/OTP abuse and signed-URL leaks.
+- For Supabase Auth SMS sign-in, validate current vendor configuration, required SMS setup and India regulatory/telecom requirements with official documentation. Never invent SMS pricing or delivery guarantees. Use test numbers only in non-production testing and never a master login bypass.
+- Strict separation of local/development, staging and production credentials and data. Add email/SMS sending safeguards for staging.
+- Protect privacy when discoverability is toggled off or profiles are deleted. Define secure retention and rights-handling before live launch; do not silently delete legal/audit ledgers.
+- Payments: create server-side orders, verify webhook authenticity against raw payload as the gateway requires, verify amount/currency/order/account/purpose, idempotent event processing, never grant entitlements from browser callback alone, reconcile orphaned payments and test partial failures.
+- For future contact reveal, build a single permission-checked server endpoint that returns PII ONLY when explicit entitlement AND ongoing authorization both pass; never include contact PII in anonymized feed responses or hydrated page state.
+
+SCREENS AND FUNCTIONAL COVERAGE
+Public: marketing landing page, value proposition, FAQ, privacy/terms placeholders (not fictional legal approvals), worker/employer signup/login, support contact.
+Worker: mobile-first dashboard, OTP/login/logout, complete profile wizard, saved/edit profile, experience (Fresher/1-3/3-5/5+), categories/skills, salary INR, vehicle types (motorcycle/scooter/EV/bicycle/walking), own-vehicle and fuel flag, shift, availability and joining, job feed (15km default), radius/search/sort/filter, job detail, saved jobs, apply, applications timeline, notifications, discoverability/privacy, optional private docs, authorized chat, support/settings.
+Employer: organization registration, membership/team permissions, verification status, employer dashboard, draft/create/edit jobs, pay-to-submit flag, approval queue/status, jobs analytics, applicants and status transitions, eligible anonymized candidate search, purchase/reuse contact entitlement, authorized communications, transaction receipts/history, dispute tickets, team settings. Ensure no candidate names/contacts in locked previews.
+Admin: separate privileged entry, dashboards, pending employer verification, suspicious employer moderation, job review/approve/reject/pause, applicant abuse/reporting, block/suspend, payment dispute queue, contact unlock audit, event logs, support ticket handling, minimal monitoring overview; never expose controls to workers/employers through unguarded endpoints.
+Shared: well-designed empty/error/skeleton states, mobile nav, accessibility, validation, pagination, search debounce, timezone formatting, secure confirmation flows and optimistic updates only when safe.
+
+PHASE-BY-PHASE EXECUTION — COMPLETE ALL POSSIBLE PHASES FROM THIS SINGLE PROMPT
+PHASE 0 | REPOSITORY + PRD AUDIT
+Read PRD and repo. Produce /docs/prd_reconciliation.md, /docs/requirements_traceability.md, /docs/open_decisions.md and a risk register. Label each requirement as ORIGINAL PRD / OWNER OVERRIDE / ENGINEERING PROPOSAL. Capture unresolved categories, minimum profile completion, application statuses/transitions, withdrawal/reapply, location data strategy, SMS gateway, payment provider, precise billing timing, launch languages, verification rules, retention and support contacts. Assign conservative non-destructive defaults and continue with reversible work; ask bundled questions ONLY where external approvals/credentials are essential.
+EXIT: versioned documented requirements; known ambiguities highlighted, not silently reinterpreted.
+
+PHASE 1 | DESIGN SYSTEM + REPLIT PROJECT FOUNDATION
+Create the proper Next.js TypeScript project or safely migrate any reusable web prototype assets, coherent routes, code structure, environment validation, accessible mobile-first design system, landing page, layouts for all three portals and navigation. Add README setup instructions and commands. Configure lint/format/typecheck/build/unit/E2E scripts and meaningful CI-like local checks. Ensure previews function on Replit and provide actual URL if one exists.
+EXIT: dev server boots; typecheck/lint/build run with captured outputs; no unrelated destructive changes.
+
+PHASE 2 | SUPABASE AUTH AND SECURE MULTI-ROLE IDENTITY
+Set up Supabase client/server SSR integration, real phone OTP for workers when SMS config supplied, secure employer login strategy and admin privilege provisioning. Support session recovery, expiry, logout, route-level server access checks, resend timers, invalid/expired OTP UX, account state restrictions and audit logs. No Clerk remnants. Create step-by-step Supabase dashboard and Replit secrets guide. Where real SMS requires secrets, build the integration and mark live verification BLOCKED until credentials arrive, rather than pretending it passed.
+EXIT: actual multi-user signed-in/out flows tested using staging environment; if external access missing, mark integration tests NOT TESTED.
+
+PHASE 3 | SUPABASE DATABASE + RLS + SQL DELIVERABLES
+Generate the numbered SQL artifacts described above, apply only to a newly approved staging Supabase project, track migration results, repair ordering/SQL errors, enable all RLS/grants, create private buckets and verify worker/organization isolation using real JWT contexts. Implement transaction-safe apply operation and 20/day IST cap. Document steps for owner to manually paste each separate file in Supabase SQL Editor if automatic connection is unavailable. Do not use service role to 'prove' RLS tests; test with real ordinary users and permission-denied negative cases.
+EXIT: migration checklist plus verified isolation, invariants and concurrency evidence; otherwise precise blockers.
+
+PHASE 4 | COMPLETE WORKER PORTAL
+Implement worker onboarding/profile, job browsing/search/filters/radius, save/unsave, live-only job details, secure apply, 20/day feedback, status tracking, privacy/discoverability, notifications and safe optional documents. Include GPS permission fallback, loading/offline states, clear role-specific navigation and accessible responsive pages. For launch-without-employers scenario use only properly labeled staging/pilot jobs; never show unapproved fake jobs as real listings.
+EXIT: worker end-to-end signup -> profile -> search -> apply -> track -> logout flows pass on mobile and desktop test projects.
+
+PHASE 5 | COMPLETE EMPLOYER PORTAL
+Implement organization workflow, account types and staff memberships, safe job CRUD/draft/submit flow, moderation status, applicant management and explicit status transitions, anonymized discovery only for opted-in workers, contact unlock UX behind payment gate. Every read/write is membership-scoped. Build unpaid/draft flow when gateway credentials absent but DO NOT publish a paid job without the authorized entitlement/payment rule.
+EXIT: two-employer isolation tests and zero unauthorized worker contact leakage, with evidence.
+
+PHASE 6 | COMPLETE ADMIN / TRUST PORTAL
+Implement server-protected admin access, employer verification, job moderation, trust/suspicious/blocked management, audit logs, dispute/support handling, alerts and human review queue. Configure the first admin using allowlisted/server-side provisioning, never by public signup checkbox. Tests must attempt privilege escalation and blocked-employer operations.
+EXIT: admin workflows and cross-role access tests pass.
+
+PHASE 7 | PAYMENTS + CONTACT UNLOCK (SAFE SANDBOX)
+Build the schema, gateway abstraction, configurable prices, secure order creation and signed webhook contract, event logs, entitlement verification, idempotency, receipts and disputes. Integrate REAL selected gateway only after owner choice and sandbox credentials. Test INR 99 job posting, INR 10 per employer-candidate unique unlock, replay/double click/failed/pending/mismatched webhooks and refunds. Keep production billing disabled until the owner approves going live. Any gateway-specific untested behavior must be labeled NOT TESTED.
+EXIT: sandbox evidence or visible external-credential blocker; no fake 'payment success' to real entitlement.
+
+PHASE 8 | AUTHORIZED CHAT + NOTIFICATIONS
+Implement text-only chat that requires shortlisted application or explicit authorized employer-worker relationship; messages readable only by participants and never through unscoped Realtime broadcast. Implement in-app notifications, read/unread, relevant application changes and safe retry; push notifications only if explicitly approved/provider set up.
+EXIT: unauthorized direct message queries and subscriptions denied; notifications correctly isolated.
+
+PHASE 9 | COMPLETE QA, SECURITY, PERFORMANCE, ACCESSIBILITY
+Run comprehensive automated and manual-assisted checks; fix failures; rerun regressions. Unit/DB/integration/E2E/browser tests, mobile/tablet/desktop, keyboard and screen readers where possible, slow network, missing permissions, invalid inputs, persistence after fresh sessions, cross-user data access, broken pages, concurrency and race tests, payment replay. Do not use screenshots alone as evidence of authorization correctness. Produce /docs/qa_results.md with test IDs, steps, commands, actual outputs, failures, retest results and NOT TESTED reasons. No fictitious green checks.
+EXIT: all critical code/test failures fixed; any missing real-service test remains a launch blocker.
+
+PHASE 10 | SECURITY/LEGAL/OPERATIONS + DEPLOYMENT READINESS
+Produce Replit deploy guide, Supabase production setup, migration-runbook, backups/restore verification guidance, safe secret rotation, monitoring, logging, rate limit strategy, privacy/consent text pending legal approval, data export/deletion workflows, incident/support runbook, rollback plan, canonical URLs, HTTPS and release gates. Run clean production build and test deployed preview when possible. Do NOT claim public launch without verified environment, domain, SMS, payment and owner approval.
+EXIT: release report classifying READY / READY WITH BLOCKERS / NOT READY and exact remediation actions.
+
+PHASE 11 | INDEPENDENT FINAL AUDIT AND HANDOFF
+Every specialist performs final independent consistency/negative-case review. Audit PRD coverage and Supabase Auth-only requirements. Identify dead links, incomplete screens, seeded/demo artifacts, security policy errors, secrets exposed, missing SQL or missing tests. Correct what can be corrected within the environment. Deliver file tree, SQL execution sequence, environment variable list without secret values, Replit preview link if real, user journeys, test matrix, risk log, owner questions and prioritized production launch checklist.
+EXIT: all created files, evidence and outstanding dependencies clearly itemized.
+
+MANDATORY TEST MATRIX (EXPAND WITH MORE CASES)
+T01 worker OTP success using actual configured test environment; T02 wrong/expired OTP; T03 resend/rate limit; T04 logout/session expiry; T05 worker A cannot read/update worker B profile; T06 private file read/write denied across workers; T07 admin role injection denied; T08 employer A cannot read employer B jobs/applicants; T09 blocked employer cannot create/publish; T10 discoverable defaults false; T11 opt-out immediately removes discovery; T12 no personally identifying fields in locked candidate previews/JSON; T13 worker only sees approved, live and non-expired jobs; T14 paused job rejected by server even if old page open; T15 default radius 15 km, manual fallback; T16 duplicate apply handled; T17 applications #1-#20 allowed on same IST day; T18 #21 denied; T19 simultaneous application burst cannot exceed 20; T20 IST midnight rollover; T21 saved jobs persist after logout/login; T22 worker cannot change application status to hired directly; T23 employer cannot skip forbidden transitions; T24 chat non-participants denied (read/write/realtime); T25 phone never revealed just for applying; T26 contact unlock requires settled/verified payment AND access rights; T27 webhook invalid signature denied; T28 mismatched amount denied; T29 pending/failed payment denied; T30 replay cannot double-unlock; T31 already-unlocked employer-worker pair never double-charged; T32 private storage signed link expires; T33 upload type/size validation; T34 SQL injection/XSS/mass assignment/IDOR attacks; T35 responsive mobile/tablet/desktop; T36 missing location permission; T37 slow/offline retry; T38 accessibility/keyboards; T39 clean production build; T40 database migration succeeds from zero on staging; T41 RLS tested with normal JWTs (not service role); T42 no secrets in browser or Git; T43 admin changes audited; T44 failed SMS/gateway displays helpful error; T45 deleted/suspended account behavior matches owner-approved policy.
+
+REPLIT DELIVERABLES — THESE ARE REQUIRED, NOT OPTIONAL
+A. A running Next.js web SaaS repo with WORKER / EMPLOYER / ADMIN portals.
+B. ONE README_FIRST.md containing beginner-friendly, exact Replit instructions.
+C. Complete /docs/ PRD reconciliation, architecture, screen routes, DB dictionary, decisions, test evidence and deployment runbooks.
+D. Individually generated and ordered .sql files under supabase/migrations/ (plus manual Supabase SQL Editor usage guide).
+E. Automated unit/integration/E2E/security tests with real logged execution evidence.
+F. .env.example, explicit Replit Secrets names, external dashboard setup steps WITHOUT actual secrets.
+G. Staging seed fixtures clearly separated from real production data.
+H. Final phase-by-phase change log, pass/fail/blocker register, release readiness checklist.
+I. Visual QA screenshots where possible, with screen sizes and any unverified status clearly identified.
+J. An owner-friendly 'exactly what I must do manually' checklist (Supabase project, SMS provider, payment gateway sandbox, DNS/domain, policies and account approvals).
+
+OWNER DECISIONS — ASK ONLY WHEN TRULY NECESSARY, NEVER BLOCK SAFE DEVELOPMENT
+Produce a single concise decision checklist covering: (1) first release includes all three portals? (this prompt assumes yes for build, but payment stays disabled); (2) worker SMS provider/India delivery and costs; (3) employer login method and mandatory verification; (4) first-admin provisioning; (5) job categories and required profile fields; (6) application status enum, withdrawals and reapplications; (7) location GPS vs pincode/geocoding choice; (8) Hindi/English scope; (9) ₹99/₹10 approval and selected gateway; (10) exact rules for contact after applications; (11) notifications/chat launch timing; (12) support contacts, retention, deletion, privacy/legal review, dispute handling. Where no answer exists, apply safer reversible defaults, mark PROPOSED, and continue building. Do not silently make legal, payment or privileged-access decisions.
+
+EXECUTION DISCIPLINE / OUTPUT PER PHASE
+- Show PHASE NAME, objective, files created/changed, actual commands, actual test outcomes, screenshots/URLs if available, security review, and next phase.
+- Fix all blocking code errors before proceeding. For integration credentials/approvals beyond your control, build a safe disabled integration, clearly note BLOCKED BY OWNER, and move to other phases.
+- Do not require the owner to send 10 new prompts. Continue through all feasible phases autonomously during this assignment. If an action requires user approval, request only that approval and keep progressing on independent work. Do not invent approvals.
+- Avoid destructive actions. Keep data migrations reviewable, transaction-safe where feasible and environment-specific.
+- No fabricated claims about live OTP, billing, deployment, database tests, independent agent activity or production readiness.
+- Prioritize real functionality over placeholder dashboards; do not call mock data a production database.
+- Output all actual files INTO THE REPLIT PROJECT. Never merely explain what code 'could be' written when you can implement it.
+
+START IMMEDIATELY
+First inspect the repository and locate the original PRD; record overrides (Supabase Auth replaces Clerk; responsive web replaces native Expo). Next prepare traceability/decision registers and begin Phase 1. Then continue through Phase 11 in order, with code, individual SQL files, tests and truthful evidence, until the largest safely achievable end-to-end product is built. At completion, give the owner one concise launch handoff identifying what works, what was tested, what is not tested, and what manual credentials/approvals are still required.
