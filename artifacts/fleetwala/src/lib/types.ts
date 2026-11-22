@@ -98,6 +98,7 @@ export interface Thread {
   participant: string;
   role: string;
   job_id: string;
+  job_title?: string;
   messages: Message[];
 }
 

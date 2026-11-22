@@ -13,7 +13,7 @@ import { gate } from '@/lib/supabase';
 import { ProtectedAdminRoute, ProtectedEmployerRoute, ProtectedWorkerRoute } from '@/components/route-guards';
 import { FindJobs, JobDetail, SavedJobs } from '@/pages/worker-jobs';
 import { Applications, Messages, Notifications, Profile, SettingsPage, Support } from '@/pages/worker-more';
-import { EmployerApplicants, EmployerBilling, EmployerCandidates, EmployerJobs, EmployerOverview, EmployerTeam } from '@/pages/employer';
+import { EmployerApplicants, EmployerBilling, EmployerCandidates, EmployerJobs, EmployerOverview, EmployerTeam, EmployerMessages } from '@/pages/employer';
 import { AdminAudit, AdminEmployers, AdminJobs, AdminOverview, AdminSupport } from '@/pages/admin';
 import { Legal, LiveSetup, Welcome } from '@/pages/public';
 import { PrivacyPage, TermsPage, SupportPage, HelpPage } from '@/pages/legal';
@@ -80,6 +80,7 @@ function Router() {
       '/employer': 'Hiring overview', '/employer/jobs': 'Manage jobs',
       '/employer/applicants': 'Applicants', '/employer/candidates': 'Candidate discovery',
       '/employer/billing': 'Billing policy', '/employer/team': 'Employer team',
+      '/employer/messages': 'Employer messages',
       '/admin': 'Trust overview', '/admin/jobs': 'Job moderation',
       '/admin/employers': 'Employer verification', '/admin/audit': 'Audit log',
       '/admin/support': 'Support queue', '/welcome': 'Local logistics hiring',
@@ -175,6 +176,9 @@ function Router() {
           </Route>
           <Route path="/employer/team">
             <ProtectedEmployerRoute><EmployerTeam /></ProtectedEmployerRoute>
+          </Route>
+          <Route path="/employer/messages">
+            <ProtectedEmployerRoute><EmployerMessages /></ProtectedEmployerRoute>
           </Route>
 
           {/* Protected Admin Routes */}

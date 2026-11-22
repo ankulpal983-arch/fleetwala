@@ -123,6 +123,17 @@ export function Applications() {
                     </Button>
                   </div>
                 )}
+                {inv.status === 'accepted' && (
+                  <div className="mt-4 flex items-center justify-between border-t pt-3">
+                    <p className="text-xs text-emerald-600 font-medium">Invitation accepted · Hiring chat is active</p>
+                    <Link href="/messages">
+                      <Button size="sm" variant="secondary" data-testid={`button-open-chat-inv-${inv.id}`}>
+                        <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
+                        Open Chat
+                      </Button>
+                    </Link>
+                  </div>
+                )}
               </article>
             ))}
           </div>
@@ -207,6 +218,8 @@ export function Messages() {
 
   useEffect(() => {
     refreshThreads();
+    const timer = setInterval(refreshThreads, 4000);
+    return () => clearInterval(timer);
   }, [session]);
 
   const threadsSource = (liveMode && session) ? (liveThreads ?? []) : state.threads;
@@ -235,20 +248,24 @@ export function Messages() {
 
   return (
     <div>
-      <PageHeader eyebrow="Worker" title="Messages" description="Text-only chat opens after an employer shortlists you. Phone numbers stay hidden." />
+      <PageHeader eyebrow="Worker" title="Messages" description="Text-only chat opens after an employer shortlists you or an invitation is accepted. Phone numbers stay hidden." />
       {threadsSource.length === 0 ? (
-        <EmptyState icon={MessageSquare} title="No conversations" body="When an employer shortlists you, a chat appears here." />
+        <EmptyState icon={MessageSquare} title="No conversations yet" body="When an employer shortlists your application or you accept a hiring invitation, a chat appears here." />
       ) : (
         <div className="grid overflow-hidden rounded-2xl border bg-card md:h-[560px] md:grid-cols-[280px_1fr]">
           <ul className="border-b md:border-b-0 md:border-r">
             {threadsSource.map((t) => {
               const last = t.messages[t.messages.length - 1];
+              const displayName = t.participant.startsWith('Hiring Team') ? t.participant : `Hiring Team — ${t.participant}`;
               return (
                 <li key={t.id}>
                   <button onClick={() => setActiveId(t.id)} className={cn('flex w-full gap-3 p-4 text-left transition-colors', t.id === currentActiveId ? 'bg-plate/20' : 'hover:bg-muted')} data-testid={`button-thread-${t.id}`}>
                     <Monogram name={t.participant} size="sm" />
-                    <span className="min-w-0"><span className="block truncate text-sm font-semibold">{t.participant}</span>
-                      <span className="block truncate text-xs text-muted-foreground">{last?.text || 'Conversation opened'}</span></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold">{displayName}</span>
+                      {t.job_title && <span className="block truncate text-xs text-primary font-medium">{t.job_title}</span>}
+                      <span className="block truncate text-xs text-muted-foreground">{last?.text || 'Conversation opened'}</span>
+                    </span>
                   </button>
                 </li>
               );
@@ -257,8 +274,10 @@ export function Messages() {
           {thread && (
             <div className="flex min-h-[420px] flex-col">
               <div className="border-b px-4 py-3">
-                <p className="font-semibold">{thread.participant}</p>
-                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">{!(liveMode && session) && <SampleTag />}{thread.role} · phone numbers stay hidden</p>
+                <p className="font-semibold">{thread.participant.startsWith('Hiring Team') ? thread.participant : `Hiring Team — ${thread.participant}`}</p>
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {thread.job_title ? `Opening: ${thread.job_title} · ` : ''}{!(liveMode && session) && <SampleTag />}{thread.role} · phone numbers stay hidden
+                </p>
               </div>
               <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
                 {thread.messages.map((m) => (

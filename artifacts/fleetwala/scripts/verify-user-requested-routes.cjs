@@ -9,9 +9,11 @@ const routesToTest = [
   { url: 'http://localhost:3000/signup', name: '03-signup', expectedText: 'Create your FleetWala account' },
   { url: 'http://localhost:3000/employer', name: '04-employer', expectedText: 'Employer Workspace' },
   { url: 'http://localhost:3000/employer/jobs', name: '05-employer-jobs', expectedText: 'Employer Workspace' },
+  { url: 'http://localhost:3000/employer/messages', name: '09-employer-messages', expectedText: 'Employer Workspace' },
   { url: 'http://localhost:3000/admin', name: '06-admin', expectedText: 'Administrator Access Denied' },
   { url: 'http://localhost:3000/profile', name: '07-profile', expectedText: 'Worker Portal Only' },
-  { url: 'http://localhost:3000/applications', name: '08-applications', expectedText: 'Worker Portal Only' }
+  { url: 'http://localhost:3000/applications', name: '08-applications', expectedText: 'Worker Portal Only' },
+  { url: 'http://localhost:3000/messages', name: '10-worker-messages', expectedText: 'Worker Portal Only' }
 ];
 
 async function runTestSuite() {

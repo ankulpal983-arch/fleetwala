@@ -31,6 +31,7 @@ const NAV: Record<Workspace, NavItem[]> = {
     { href: '/employer', label: 'Overview', icon: LayoutDashboard },
     { href: '/employer/jobs', label: 'Manage jobs', icon: Briefcase },
     { href: '/employer/applicants', label: 'Applicants', icon: ListChecks },
+    { href: '/employer/messages', label: 'Messages', icon: MessageSquare },
     { href: '/employer/candidates', label: 'Find Candidates', icon: UsersRound },
     { href: '/employer/billing', label: 'Billing', icon: CreditCard },
     { href: '/employer/team', label: 'Company Team', icon: Users },

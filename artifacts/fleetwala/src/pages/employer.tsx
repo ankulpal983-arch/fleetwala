@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Link } from 'wouter';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Briefcase, CreditCard, Lock, Pencil, Plus, Send, Trash2, UserPlus, Users, UsersRound, Pause, Play, XCircle, ListChecks, Loader2, AlertCircle } from 'lucide-react';
+import { Briefcase, CreditCard, Lock, Pencil, Plus, Send, Trash2, UserPlus, Users, UsersRound, Pause, Play, XCircle, ListChecks, Loader2, AlertCircle, MessageSquare, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -17,17 +17,19 @@ import {
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { EmptyState, PageHeader, SampleTag, Stat, StatusPill } from '@/components/common';
+import { EmptyState, Monogram, PageHeader, SampleTag, Stat, StatusPill } from '@/components/common';
 import { CATEGORIES, CITIES, CITY_NAMES, EXPERIENCE, PILOT_EMPLOYER_ID, SHIFTS, VEHICLES } from '@/lib/fixtures';
 import { usePilot, type JobInput } from '@/lib/store';
-import { ago, istDate, salaryRange } from '@/lib/format';
+import { ago, istDate, istStamp, salaryRange } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { AppStatus, Candidate, Job, JobCategory, JobStatus, TeamMember } from '@/lib/types';
+import type { AppStatus, Candidate, Job, JobCategory, JobStatus, TeamMember, Thread } from '@/lib/types';
 import { liveMode, useSession } from '@/lib/supabase';
 import {
   discoverLiveCandidates, getLiveEmployerOrg, createLiveJobDraft,
   updateLiveJobDraft, submitLiveJobDraft, getLiveEmployerJobs, getLiveEmployerApplicants,
-  setLiveApplicationStatus, type LiveApplicant, createLiveCandidateInvitation
+  setLiveApplicationStatus, type LiveApplicant, createLiveCandidateInvitation,
+  createLiveApplicationInvitation, updateLiveEmployerJobState, getLiveConversations,
+  sendLiveMessage
 } from '@/lib/repo';
 
 const COMPANY = 'Ghar-Tak Parcels';
@@ -471,8 +473,26 @@ export function EmployerJobs() {
           toast({ title: 'Submission failed', description: res.error, variant: 'destructive' });
           return;
         }
+      } else if (s === 'paused') {
+        const res = await updateLiveEmployerJobState(j.id, 'pause');
+        if (!res.ok) {
+          toast({ title: 'Pause failed', description: res.error, variant: 'destructive' });
+          return;
+        }
+      } else if (s === 'approved') {
+        const res = await updateLiveEmployerJobState(j.id, 'resume');
+        if (!res.ok) {
+          toast({ title: 'Resume failed', description: res.error, variant: 'destructive' });
+          return;
+        }
+      } else if (s === 'closed') {
+        const res = await updateLiveEmployerJobState(j.id, 'close');
+        if (!res.ok) {
+          toast({ title: 'Close failed', description: res.error, variant: 'destructive' });
+          return;
+        }
       }
-      refreshLive();
+      await refreshLive();
       toast({ title: msg, description: j.title });
       return;
     }
@@ -561,6 +581,7 @@ export function EmployerApplicants() {
   const { jobs, apps, state, actions, orgName, isLive, refreshLive } = useEmployer();
   const { toast } = useToast();
   const [jobFilter, setJobFilter] = useState('all');
+  const [inviteApp, setInviteApp] = useState<{ id: string; label: string; jobTitle: string } | null>(null);
   const list = apps.filter((a) => jobFilter === 'all' || a.job_id === jobFilter).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
 
   const handleStatusChange = async (appId: string, status: AppStatus, label: string) => {
@@ -586,7 +607,7 @@ export function EmployerApplicants() {
       {list.length === 0 ? <EmptyState icon={ListChecks} title="No applicants yet" body="Applicants appear once a job is approved and workers apply." /> : (
         <div className="overflow-hidden rounded-xl border bg-card">
           <Table>
-            <TableHeader><TableRow><TableHead>Candidate</TableHead><TableHead className="hidden md:table-cell">Job</TableHead><TableHead className="hidden md:table-cell">Applied</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Move to</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Candidate</TableHead><TableHead className="hidden md:table-cell">Job</TableHead><TableHead className="hidden md:table-cell">Applied</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
             <TableBody>
               {list.map((a) => {
                 const isLiveApp = 'candidate_code' in a;
@@ -604,8 +625,32 @@ export function EmployerApplicants() {
                     <TableCell className="hidden text-sm md:table-cell">{jobTitle}</TableCell>
                     <TableCell className="hidden text-xs md:table-cell">{ago(a.created_at)}</TableCell>
                     <TableCell><StatusPill status={a.status} testId={`status-applicant-${a.id}`} /></TableCell>
-                    <TableCell><div className="flex justify-end gap-1">
-                      {NEXT[a.status].length === 0 ? <span className="text-xs text-muted-foreground">Final</span> : NEXT[a.status].map((s) => (
+                    <TableCell><div className="flex justify-end items-center gap-1">
+                      {(a.status === 'applied' || a.status === 'viewed') && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setInviteApp({ id: a.id, label, jobTitle })}
+                          data-testid={`button-invite-app-${a.id}`}
+                          title="Send hiring invitation"
+                        >
+                          <Mail className="mr-1 h-3.5 w-3.5" />
+                          Invite
+                        </Button>
+                      )}
+                      {(a.status === 'shortlisted' || a.status === 'hired') && (
+                        <Link href="/employer/messages">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            data-testid={`button-chat-app-${a.id}`}
+                          >
+                            <MessageSquare className="mr-1 h-3.5 w-3.5" />
+                            Chat
+                          </Button>
+                        </Link>
+                      )}
+                      {NEXT[a.status].length === 0 ? <span className="text-xs text-muted-foreground ml-1">Final</span> : NEXT[a.status].map((s) => (
                         <Button key={s} size="sm" variant={s === 'rejected' ? 'ghost' : 'outline'} className="capitalize" onClick={() => handleStatusChange(a.id, s, label)} data-testid={`button-${s}-${a.id}`}>{s === 'viewed' ? 'Mark viewed' : s === 'rejected' ? 'Reject' : s}</Button>
                       ))}
                     </div></TableCell>
@@ -616,7 +661,100 @@ export function EmployerApplicants() {
           </Table>
         </div>
       )}
+      <InviteApplicantDialog
+        app={inviteApp}
+        open={Boolean(inviteApp)}
+        onOpenChange={(o) => { if (!o) setInviteApp(null); }}
+        onSuccess={() => { refreshLive(); }}
+      />
     </div>
+  );
+}
+
+function InviteApplicantDialog({
+  app,
+  open,
+  onOpenChange,
+  onSuccess,
+}: {
+  app: { id: string; label: string; jobTitle: string } | null;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onSuccess?: () => void;
+}) {
+  const { toast } = useToast();
+  const [message, setMessage] = useState('Hi, we reviewed your application on FleetWala and would like to invite you to discuss our active logistics opening.');
+  const [sending, setSending] = useState(false);
+
+  if (!app) return null;
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      const res = await createLiveApplicationInvitation(app.id, message.trim());
+      if (!res.ok) {
+        toast({
+          title: 'Invitation failed',
+          description: res.error || 'Could not send invitation.',
+          variant: 'destructive',
+        });
+        setSending(false);
+        return;
+      }
+      toast({
+        title: 'Invitation sent',
+        description: `Candidate ${app.label} has been invited to discuss ${app.jobTitle}.`,
+      });
+      onOpenChange(false);
+      onSuccess?.();
+    } catch (err: any) {
+      toast({
+        title: 'Error sending invitation',
+        description: err.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Send Hiring Invitation</DialogTitle>
+          <DialogDescription>
+            Invite candidate {app.label} for "{app.jobTitle}".
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="inv-app-note">Invitation Message (Optional)</Label>
+            <Textarea
+              id="inv-app-note"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Add details about interview shift, timings, or warehouse location..."
+              className="min-h-[100px] text-sm"
+              maxLength={1000}
+            />
+            <p className="text-[11px] text-muted-foreground text-right">{message.length} / 1000</p>
+          </div>
+          <div className="rounded-lg bg-plate/20 p-3 text-xs text-muted-foreground">
+            Once accepted by the worker, direct in-app chat is immediately activated in your Messages tab.
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={sending}>
+            Cancel
+          </Button>
+          <Button onClick={handleSend} disabled={sending} data-testid="button-confirm-app-invite">
+            {sending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Send Invitation
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -909,6 +1047,181 @@ export function EmployerTeam() {
           </Form>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+export function EmployerMessages() {
+  const { orgName } = useEmployer();
+  const { session } = useSession();
+  const { toast } = useToast();
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [activeId, setActiveId] = useState('');
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  const loadConversations = async () => {
+    if (liveMode && session) {
+      try {
+        const list = await getLiveConversations();
+        if (list) {
+          setThreads(list);
+          if (list.length > 0 && !activeId) {
+            setActiveId(list[0].id);
+          }
+        }
+      } catch (err: any) {
+        console.error('Error fetching conversations:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    loadConversations();
+    const timer = setInterval(loadConversations, 4000);
+    return () => clearInterval(timer);
+  }, [session]);
+
+  const activeThread = threads.find((t) => t.id === activeId) || threads[0];
+  const msgCount = activeThread?.messages.length ?? 0;
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [msgCount]);
+
+  const handleSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const body = text.trim();
+    if (!body || !activeThread || sending) return;
+
+    setSending(true);
+    try {
+      const res = await sendLiveMessage(activeThread.id, body.slice(0, 4000));
+      if (!res.ok) {
+        toast({ title: 'Message failed', description: res.error, variant: 'destructive' });
+      } else {
+        setText('');
+        await loadConversations();
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div>
+      <PageHeader
+        eyebrow={orgName}
+        title="Messages"
+        description="Direct communication with shortlisted and invited logistics candidates."
+      />
+      {threads.length === 0 ? (
+        <EmptyState
+          icon={MessageSquare}
+          title="No conversations yet"
+          body="When you shortlist an applicant or an applicant accepts your hiring invitation, a conversation appears here."
+        />
+      ) : (
+        <div className="grid overflow-hidden rounded-2xl border bg-card md:h-[600px] md:grid-cols-[300px_1fr]">
+          <ul className="border-b overflow-y-auto md:border-b-0 md:border-r">
+            {threads.map((t) => {
+              const last = t.messages[t.messages.length - 1];
+              return (
+                <li key={t.id}>
+                  <button
+                    onClick={() => setActiveId(t.id)}
+                    className={cn(
+                      'flex w-full gap-3 p-4 text-left transition-colors border-b last:border-b-0',
+                      t.id === (activeThread?.id) ? 'bg-plate/20 font-medium' : 'hover:bg-muted'
+                    )}
+                    data-testid={`button-thread-${t.id}`}
+                  >
+                    <Monogram name={t.participant} size="sm" />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center justify-between gap-1">
+                        <span className="truncate text-sm font-semibold">{t.participant}</span>
+                        {last?.at && (
+                          <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                            {istStamp(last.at)}
+                          </span>
+                        )}
+                      </span>
+                      {t.job_title && (
+                        <span className="block truncate text-xs text-primary font-medium">
+                          {t.job_title}
+                        </span>
+                      )}
+                      <span className="block truncate text-xs text-muted-foreground mt-0.5">
+                        {last?.text || 'Conversation opened'}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {activeThread ? (
+            <div className="flex min-h-[440px] flex-col">
+              <div className="border-b px-4 py-3 flex items-center justify-between">
+                <div>
+                  <p className="font-semibold text-sm">{activeThread.participant}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {activeThread.job_title ? `Opening: ${activeThread.job_title} · ` : ''}Phone numbers stay hidden for privacy
+                  </p>
+                </div>
+              </div>
+              <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
+                {activeThread.messages.map((m: any) => (
+                  <div key={m.id} className={cn('flex', m.from === 'me' && 'justify-end')}>
+                    <div
+                      className={cn(
+                        'max-w-[78%] rounded-2xl px-3.5 py-2 text-sm shadow-sm',
+                        m.from === 'me'
+                          ? 'rounded-br-sm bg-primary text-primary-foreground'
+                          : 'rounded-bl-sm bg-muted text-foreground'
+                      )}
+                    >
+                      {m.text}
+                      <span
+                        className={cn(
+                          'mt-1 block font-mono text-[10px]',
+                          m.from === 'me' ? 'text-primary-foreground/70' : 'text-muted-foreground'
+                        )}
+                      >
+                        {istStamp(m.at)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                <div ref={endRef} />
+              </div>
+              <form onSubmit={handleSend} className="border-t p-3 flex gap-2 items-center bg-card">
+                <Input
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="Type a message to candidate..."
+                  className="flex-1"
+                  maxLength={4000}
+                  disabled={sending}
+                  data-testid="input-employer-message"
+                />
+                <Button type="submit" disabled={!text.trim() || sending} data-testid="button-employer-send">
+                  <Send className="h-4 w-4" />
+                  <span className="sr-only">Send</span>
+                </Button>
+              </form>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center p-8 text-muted-foreground text-sm">
+              Select a conversation to view messages.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

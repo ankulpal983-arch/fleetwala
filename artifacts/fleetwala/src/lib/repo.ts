@@ -924,6 +924,24 @@ export async function getLiveConversations(): Promise<Thread[] | null> {
   const { data: { user } } = await c.auth.getUser();
   if (!user) return null;
 
+  // Use hardened canonical RPC get_user_conversations() for both Worker and Employer
+  const { data: rpcData, error: rpcErr } = await c.rpc('get_user_conversations');
+  if (!rpcErr && Array.isArray(rpcData)) {
+    return rpcData.map((row: any) => ({
+      id: row.conversation_id,
+      participant: row.participant_name,
+      role: row.participant_role,
+      job_id: row.job_id,
+      job_title: row.job_title,
+      messages: (row.messages_json || []).map((m: any) => ({
+        id: m.id,
+        from: m.from,
+        text: m.text,
+        at: m.at,
+      })),
+    }));
+  }
+
   const { data, error } = await c
     .from('conversations')
     .select(`
@@ -948,7 +966,7 @@ export async function getLiveConversations(): Promise<Thread[] | null> {
     const isWorkerUser = conv.application?.worker?.user_id === user.id;
     const participantName = isWorkerUser
       ? (conv.application?.job?.employers?.legal_name || 'Hiring Manager')
-      : 'Shortlisted Candidate';
+      : (conv.application?.worker?.full_name || 'Shortlisted Candidate');
     const participantRole = isWorkerUser ? 'Employer' : 'Candidate';
 
     const sortedMessages = (conv.messages || []).sort(
@@ -982,6 +1000,27 @@ export async function sendLiveMessage(conversationId: string, body: string): Pro
 
   if (error) return { ok: false, error: error.message };
   return { ok: true, data: { messageId: data } };
+}
+
+/** Update employer job state (pause, resume, close) in PostgreSQL */
+export async function updateLiveEmployerJobState(
+  jobId: string,
+  action: 'pause' | 'resume' | 'close'
+): Promise<RepositoryResult<{ newState: string }>> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { data, error } = await c.rpc('update_employer_job_state', {
+    p_job_id: jobId,
+    p_action: action,
+  });
+
+  if (error) {
+    console.error('[Repo] updateLiveEmployerJobState error:', error);
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true, data: { newState: data } };
 }
 
 /** Bootstrap one-time Administrator seat */
@@ -1028,6 +1067,27 @@ export interface LiveEmployerInvitation {
   status: 'pending' | 'accepted' | 'declined' | 'expired';
   created_at: string;
   responded_at: string | null;
+}
+
+/** Create a real application-linked invitation from employer */
+export async function createLiveApplicationInvitation(
+  applicationId: string,
+  message?: string
+): Promise<RepositoryResult<{ invitationId: string }>> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { data, error } = await c.rpc('create_application_invitation', {
+    p_application_id: applicationId,
+    p_message: message || null,
+  });
+
+  if (error) {
+    console.error('[Repo] createLiveApplicationInvitation error:', error);
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true, data: { invitationId: data } };
 }
 
 /** Create a real candidate invitation from verified employer */
