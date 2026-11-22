@@ -107,15 +107,25 @@ export function Shell({ children }: { children: ReactNode }) {
                   <ShieldCheck className="h-4 w-4 text-primary" />{LABEL[ws]}<ChevronDown className="h-3.5 w-3.5 opacity-60" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuContent align="end" className="w-72">
                 <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                  Demo view switcher. Not access control. Real roles come from your account once live.
+                  {session ? (
+                    <span>
+                      <strong className="text-foreground">Signed in:</strong> {session.user?.email}<br />
+                      <strong className="text-foreground">Account Role:</strong> {String(session.user?.user_metadata?.role ?? 'Worker')}<br />
+                      <span className="text-[10px] text-muted-foreground mt-1 block">
+                        Server-side RLS controls live access. View switcher only toggles navigation.
+                      </span>
+                    </span>
+                  ) : (
+                    <span>Pre-Production view switcher. Sign in to access your verified account.</span>
+                  )}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {(['worker', 'employer', 'admin'] as Workspace[]).map((w) => (
                   <DropdownMenuItem key={w} onSelect={() => navigate(w === 'worker' ? '/' : `/${w}`)} data-testid={`menu-workspace-${w}`}>
                     <span className={cn('mr-2 h-2 w-2 rounded-full', w === ws ? 'bg-plate' : 'bg-muted')} />
-                    {LABEL[w]} view (demo)
+                    {LABEL[w]} workspace {session && session.user?.user_metadata?.role !== w ? '(view only)' : ''}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -126,9 +136,13 @@ export function Shell({ children }: { children: ReactNode }) {
                 {unread > 0 && <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-chart-4 px-1 text-[10px] font-bold text-white">{unread}</span>}
               </Link>
             )}
-            {!session && (
+            {!session ? (
               <Link href="/login" className="hidden items-center gap-1 rounded-md px-2 py-1.5 text-sm font-medium hover:bg-muted md:inline-flex" data-testid="link-login">
                 <LogIn className="h-4 w-4" />Sign in
+              </Link>
+            ) : (
+              <Link href="/login" className="hidden items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium hover:bg-muted md:inline-flex" data-testid="link-account">
+                <UserRound className="h-3.5 w-3.5" />Account
               </Link>
             )}
           </div>
@@ -136,7 +150,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="border-t border-dashed px-4 py-1 text-center sm:hidden"><PilotChip /></div>
         {session && (
           <div className="border-t bg-plate/15 px-4 py-1.5 text-center text-xs" data-testid="status-signed-in-pilot">
-            Signed in. This workspace still shows sample pilot data, not your live account data.
+            Signed in as <span className="font-semibold">{session.user?.email}</span> ({String(session.user?.user_metadata?.role ?? 'Worker')}). Staging integration active.
           </div>
         )}
         {loadError && (

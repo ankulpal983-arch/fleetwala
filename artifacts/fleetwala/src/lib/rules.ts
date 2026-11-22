@@ -93,3 +93,16 @@ export function anonymizedCandidateProjection(worker: WorkerProfile): Pick<Worke
     available: worker.available,
   };
 }
+
+/** Business PRD pricing baseline (Migration 008) */
+export const PRD_PRICING = {
+  JOB_POSTING_INR: 99,
+  CANDIDATE_UNLOCK_INR: 10,
+} as const;
+
+/** Valid client self-registration roles (Admin is strictly invite/provisioning-only) */
+export const ALLOWED_REGISTRATION_ROLES = ['worker', 'employer'] as const;
+export function isAllowedRegistrationRole(role: string): boolean {
+  return (ALLOWED_REGISTRATION_ROLES as readonly string[]).includes(role);
+}
+

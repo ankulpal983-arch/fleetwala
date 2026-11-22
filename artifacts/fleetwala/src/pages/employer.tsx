@@ -317,29 +317,86 @@ export function EmployerCandidates() {
 }
 
 export function EmployerBilling() {
-  const plans = [
-    { name: 'Starter', price: '\u20B90', note: 'Pilot', items: ['2 live jobs', '40 applicant reviews / month'], current: true },
-    { name: 'Hub', price: '\u20B93,499', note: 'per month + GST', items: ['10 live jobs', 'Candidate discovery', '3 team seats'] },
-    { name: 'Fleet', price: '\u20B911,900', note: 'per month + GST', items: ['Unlimited jobs', 'Multi-city', 'Priority verification'] },
+  const pricingModels = [
+    {
+      name: 'Standard Job Posting',
+      price: '\u20B999',
+      unit: '/ posting',
+      description: 'Single verified listing active for 30 calendar days across city search.',
+      features: ['Published after moderation', 'Unlimited applicant views', 'Applicant status tracking (Shortlist, Hire, Reject)', 'Zero hidden commission'],
+      gateStatus: 'Gated in Pre-Production',
+    },
+    {
+      name: 'Candidate Contact Unlock',
+      price: '\u20B910',
+      unit: '/ unlock',
+      description: 'Unlock verified contact details (full name & phone) for an opted-in candidate.',
+      features: ['Worker discoverability consent verified', 'Direct WhatsApp & phone connect', 'Single-org lifetime unlock', 'Instant audit logging'],
+      gateStatus: 'Gated in Pre-Production',
+    },
+    {
+      name: 'Hub Subscription (Future)',
+      price: '\u20B93,499',
+      unit: '/ month + GST',
+      description: 'High-volume hiring package for logistics hubs and DSP partners.',
+      features: ['Up to 10 active job listings', 'Priority moderation queue', '50 candidate unlocks included', '3 recruiter team seats'],
+      gateStatus: 'Coming in Production',
+    },
   ];
+
   return (
     <div>
-      <PageHeader eyebrow={COMPANY} title="Billing" description="Payments are disabled in the pilot. Prices shown are indicative only." />
-      <div className="mb-6 flex items-center gap-3 rounded-xl border border-dashed border-plate bg-plate/10 p-4 text-sm" role="status">
-        <CreditCard className="h-5 w-5" />No payment provider is connected. Nothing can be charged and no payment will ever show as successful here.
+      <PageHeader
+        eyebrow={COMPANY}
+        title="Billing & Pricing"
+        description="Official PRD baseline pricing. Real payments remain strictly disabled during pre-production."
+      />
+
+      <div className="mb-6 rounded-xl border border-dashed border-primary/30 bg-primary/5 p-4 text-xs space-y-2" role="status">
+        <p className="flex items-center gap-2 font-bold text-foreground">
+          <CreditCard className="h-4 w-4 text-primary" />
+          Pre-Production Payment Gate Active (Owner Decision #8)
+        </p>
+        <p className="text-muted-foreground">
+          Real payment processing is disabled until a payment gateway (Razorpay vs Cashfree) is selected and sandbox API keys are provisioned. The database schema (Migration 008: <code className="font-mono">billing_settings</code>) enforces server-side pricing authority of <strong>\u20B999 per job</strong> and <strong>\u20B910 per candidate unlock</strong> with idempotency and webhook replay defense.
+        </p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-[1fr_1fr_1fr]">
-        {plans.map((p) => (
-          <div key={p.name} className={cn('flex flex-col rounded-2xl border bg-card p-5', p.current && 'border-2 border-primary')}>
-            <div className="flex items-center justify-between"><h2 className="text-xl font-bold">{p.name}</h2>{p.current && <StatusPill status="active" />}</div>
-            <p className="mt-2 font-display text-3xl font-extrabold">{p.price}<span className="ml-1 text-xs font-normal text-muted-foreground">{p.note}</span></p>
-            <ul className="mt-4 flex-1 space-y-1.5 text-sm">{p.items.map((i) => <li key={i} className="border-b border-dashed pb-1.5">{i}</li>)}</ul>
-            <Button className="mt-5" variant={p.current ? 'outline' : 'default'} disabled data-testid={`button-plan-${p.name.toLowerCase()}`}>{p.current ? 'Current plan' : 'Payments disabled in pilot'}</Button>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {pricingModels.map((p) => (
+          <div key={p.name} className="flex flex-col rounded-2xl border bg-card p-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold">{p.name}</h2>
+              <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-mono text-muted-foreground">
+                {p.gateStatus}
+              </span>
+            </div>
+            <p className="mt-3 font-display text-3xl font-extrabold">
+              {p.price}
+              <span className="ml-1 text-xs font-normal text-muted-foreground">{p.unit}</span>
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{p.description}</p>
+            <ul className="mt-4 flex-1 space-y-1.5 text-xs text-muted-foreground">
+              {p.features.map((f) => (
+                <li key={f} className="flex items-start gap-1.5 border-b border-dashed pb-1.5">
+                  <span className="text-primary font-bold">✓</span>
+                  <span>{f}</span>
+                </li>
+              ))}
+            </ul>
+            <Button className="mt-5 text-xs" variant="outline" disabled data-testid={`button-plan-${p.name.toLowerCase().replace(/\s+/g, '-')}`}>
+              Payments Disabled in Pre-Production
+            </Button>
           </div>
         ))}
       </div>
-      <h2 className="mb-3 mt-8 text-lg font-bold">Invoices</h2>
-      <EmptyState icon={CreditCard} title="No invoices" body="GST invoices will appear here once billing is live." />
+
+      <h2 className="mb-3 mt-8 text-base font-bold">Invoices & Statements</h2>
+      <EmptyState
+        icon={CreditCard}
+        title="No invoices in pre-production"
+        body="GST-compliant tax invoices and Razorpay/Cashfree transaction receipts will appear here once gateway webhook verification is activated."
+      />
     </div>
   );
 }

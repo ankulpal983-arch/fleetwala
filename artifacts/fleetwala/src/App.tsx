@@ -54,8 +54,8 @@ function Router() {
       </RoutedErrorBoundary>
     );
   }
-  // Fail closed: live mode requested but live data is not wired.
-  if (gate.blocked || gate.showLiveData) return <LiveSetup />;
+  // Fail closed: live mode requested but live data or config is not ready.
+  if (gate.blocked) return <LiveSetup />;
   return (
     <Shell>
       <RoutedErrorBoundary>

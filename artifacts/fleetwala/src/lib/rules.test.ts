@@ -2,11 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DAILY_LIMIT,
+  PRD_PRICING,
   anonymizedCandidateProjection,
   canApplyToday,
   countToday,
   defaultProfile,
   hasProhibitedFee,
+  isAllowedRegistrationRole,
   isLiveJob,
   isValidAppStatusTransition,
   isValidSalaryRange,
@@ -151,3 +153,31 @@ test('anonymized candidate projection excludes sensitive contact PII', () => {
   assert.equal('email' in projected, false);
   assert.equal('address' in projected, false);
 });
+
+test('liveGate with wired: true passes cleanly when configured', () => {
+  assert.deepEqual(
+    liveGate({ enableFlag: true, supabaseConfigured: true, wired: true }),
+    { requested: true, showLiveData: true, blocked: false }
+  );
+});
+
+test('pricing baseline conforms to PRD: ₹99 job post, ₹10 candidate unlock', () => {
+  assert.equal(PRD_PRICING.JOB_POSTING_INR, 99);
+  assert.equal(PRD_PRICING.CANDIDATE_UNLOCK_INR, 10);
+});
+
+test('admin privileges cannot be obtained via self-registration roles', () => {
+  assert.equal(isAllowedRegistrationRole('worker'), true);
+  assert.equal(isAllowedRegistrationRole('employer'), true);
+  assert.equal(isAllowedRegistrationRole('admin'), false, 'Admin self-registration must be strictly rejected');
+  assert.equal(isAllowedRegistrationRole('superuser'), false);
+  assert.equal(isAllowedRegistrationRole(''), false);
+});
+
+test('candidate opt-out discoverability defaults to false', () => {
+  const defaultWorker = defaultProfile();
+  assert.equal(defaultWorker.discoverable, false);
+  const optedInWorker = defaultProfile({ discoverable: true });
+  assert.equal(optedInWorker.discoverable, true);
+});
+
