@@ -82,7 +82,7 @@ export function FindJobs() {
     };
   }, [session]);
 
-  const baseJobs = (liveMode && liveDbJobs && liveDbJobs.length > 0) ? liveDbJobs : state.jobs;
+  const baseJobs = liveMode ? (liveDbJobs ?? []) : state.jobs;
 
   const jobs = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -230,7 +230,7 @@ export function FindJobs() {
           {loading ? (
             <div className="grid gap-4 xl:grid-cols-2">{[0, 1, 2, 3].map((i) => <CardSkeleton key={i} />)}</div>
           ) : jobs.length === 0 ? (
-            <EmptyState icon={SearchX} title="No jobs match yet" body={`Nothing in ${area === 'any' ? city : area} with these filters. Try another area or remove a filter.`}
+            <EmptyState icon={SearchX} title={liveMode && baseJobs.length === 0 ? "No jobs available yet" : "No jobs match yet"} body={liveMode && baseJobs.length === 0 ? "No published jobs have been approved in the live network yet. Please check back soon." : `Nothing in ${area === 'any' ? city : area} with these filters. Try another area or remove a filter.`}
               action={<Button onClick={clear} data-testid="button-empty-clear">Clear filters</Button>} />
           ) : (
             <div className="grid gap-4 xl:grid-cols-2">
@@ -312,7 +312,7 @@ export function JobDetail() {
     }
   }, [id, session]);
 
-  const job = (liveMode && session && liveJob) ? liveJob : state.jobs.find((j) => j.id === id);
+  const job = liveMode ? liveJob : state.jobs.find((j) => j.id === id);
 
   if (!job || (!isLiveJob(job) && !myApps.has(job.id))) {
     return <EmptyState icon={SearchX} title="Job not available" body="This job may have closed, expired or is not yet approved." action={<Link href="/" className="font-semibold text-primary underline">Back to jobs</Link>} />;

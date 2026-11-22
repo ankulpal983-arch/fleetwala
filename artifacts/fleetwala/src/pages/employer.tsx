@@ -300,7 +300,7 @@ export function EmployerCandidates() {
     }
   }, [session, area]);
 
-  const candidatesSource = (liveMode && session) ? (liveCandidates ?? []) : state.candidates;
+  const candidatesSource = liveMode ? (liveCandidates ?? []) : state.candidates;
   const list = useMemo(() => candidatesSource.filter((c) => area === 'all' || c.area === area), [candidatesSource, area]);
   return (
     <div>

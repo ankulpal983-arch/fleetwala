@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { usePilot } from '@/lib/store';
-import { useSession } from '@/lib/supabase';
+import { liveMode, useSession } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 
 export type Workspace = 'worker' | 'employer' | 'admin';
@@ -73,6 +73,13 @@ export function Wordmark({ dark }: { dark?: boolean }) {
 }
 
 export function PilotChip() {
+  if (liveMode) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400" data-testid="status-live" title="Connected to Supabase live database.">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Live Network
+      </span>
+    );
+  }
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-plate/70 bg-plate/20 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-accent-foreground" data-testid="status-pilot" title="All data is sample data stored only in this browser.">
       <span className="h-1.5 w-1.5 rounded-full bg-chart-4" />Pilot preview · sample data
