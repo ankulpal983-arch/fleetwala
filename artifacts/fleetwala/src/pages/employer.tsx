@@ -32,15 +32,13 @@ import {
   sendLiveMessage
 } from '@/lib/repo';
 
-const COMPANY = 'Ghar-Tak Parcels';
-
 function useEmployer() {
   const p = usePilot();
   const { session } = useSession();
   const [liveOrg, setLiveOrg] = useState<{ id: string; legal_name: string; employer_type: string; verification_state: string; role?: string } | null>(null);
   const [liveJobs, setLiveJobs] = useState<Job[] | null>(null);
   const [liveApplicants, setLiveApplicants] = useState<LiveApplicant[] | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const refreshLive = () => {
     if (liveMode && session) {
@@ -68,6 +66,8 @@ function useEmployer() {
         console.warn('[useEmployer] getLiveEmployerOrg error:', err);
         setLoading(false);
       });
+    } else {
+      setLoading(false);
     }
   };
 
@@ -95,7 +95,7 @@ function useEmployer() {
   const jobIds = new Set(jobs.map((j) => j.id));
   const apps = p.state.applications.filter((a) => jobIds.has(a.job_id));
   const employer = p.state.employers.find((e) => e.id === PILOT_EMPLOYER_ID);
-  return { ...p, jobs, apps, employer, liveOrg: null, orgName: COMPANY, isLive: false, loading: false, refreshLive: () => {} };
+  return { ...p, jobs, apps, employer, liveOrg: null, orgName: 'My Organization', isLive: false, loading: false, refreshLive: () => {} };
 }
 
 export function EmployerOverview() {
@@ -291,8 +291,9 @@ function JobDialog({ open, onOpenChange, job, orgId, onSuccess }: { open: boolea
         setIsSubmitting(false);
       }
     } else {
-      const id = actions.saveJob(input, PILOT_EMPLOYER_ID, COMPANY, job?.id);
-      if (submit) actions.setJobStatus(id, 'pending', COMPANY);
+      const companyName = orgName || 'My Organization';
+      const id = actions.saveJob(input, PILOT_EMPLOYER_ID, companyName, job?.id);
+      if (submit) actions.setJobStatus(id, 'pending', companyName);
       toast({
         title: submit ? 'Submitted for review' : 'Draft saved',
         description: submit ? 'A pilot admin can approve it under Admin > Job moderation.' : v.title,
@@ -868,53 +869,74 @@ function InviteCandidateDialog({
 }
 
 export function EmployerCandidates() {
-  const { state, jobs } = useEmployer();
+  const { state, jobs, orgName } = useEmployer();
   const { session } = useSession();
   const { toast } = useToast();
+  const [city, setCity] = useState('Delhi NCR');
   const [area, setArea] = useState('all');
   const [liveCandidates, setLiveCandidates] = useState<Candidate[] | null>(null);
   const [inviting, setInviting] = useState<Candidate | null>(null);
 
   useEffect(() => {
     if (liveMode && session) {
-      discoverLiveCandidates(area === 'all' ? undefined : area).then((data) => {
+      discoverLiveCandidates(city === 'all' ? undefined : city, area === 'all' ? undefined : area).then((data) => {
         setLiveCandidates(data ?? []);
       });
     }
-  }, [session, area]);
+  }, [session, city, area]);
+
+  const availableAreas = useMemo(() => {
+    if (city === 'all' || !CITIES[city]) return [];
+    return CITIES[city];
+  }, [city]);
 
   const candidatesSource = liveMode ? (liveCandidates ?? []) : state.candidates;
   const list = useMemo(() => {
-    if (area === 'all') return candidatesSource;
-    const lowerArea = area.toLowerCase();
-    return candidatesSource.filter((c) =>
-      c.area.toLowerCase().includes(lowerArea) ||
-      (c.city && c.city.toLowerCase().includes(lowerArea))
-    );
-  }, [candidatesSource, area]);
+    return candidatesSource.filter((c) => {
+      if (city !== 'all' && c.city && !c.city.toLowerCase().includes(city.toLowerCase()) && !c.area.toLowerCase().includes(city.toLowerCase())) {
+        return false;
+      }
+      if (area !== 'all' && !c.area.toLowerCase().includes(area.toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+  }, [candidatesSource, city, area]);
 
   return (
     <div>
       <PageHeader
-        eyebrow={COMPANY}
+        eyebrow={`${orgName} · employer`}
         title="Find Candidates"
         description="Anonymised cards of workers who opted in to discovery. Contact details are masked until authorized."
         actions={
-          <div className="flex items-center gap-2">
-            <Select value={area} onValueChange={setArea}>
-              <SelectTrigger className="w-56" data-testid="select-candidate-area">
-                <SelectValue placeholder="All Regions & Areas" />
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={city} onValueChange={(v) => { setCity(v); setArea('all'); }}>
+              <SelectTrigger className="w-44" data-testid="select-candidate-city">
+                <SelectValue placeholder="Region" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Regions & Areas</SelectItem>
-                <SelectItem value="Delhi NCR">Delhi NCR (Dwarka / Okhla)</SelectItem>
-                <SelectItem value="Bengaluru">Bengaluru (All Hubs)</SelectItem>
-                <SelectItem value="Mumbai">Mumbai (Bhiwandi / Andheri)</SelectItem>
-                <SelectItem value="Hyderabad">Hyderabad</SelectItem>
-                <SelectItem value="Pune">Pune</SelectItem>
-                <SelectItem value="Chennai">Chennai</SelectItem>
+                <SelectItem value="all">All Regions</SelectItem>
+                {CITY_NAMES.map((c) => (
+                  <SelectItem key={c} value={c}>{c}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
+
+            {availableAreas.length > 0 && (
+              <Select value={area} onValueChange={setArea}>
+                <SelectTrigger className="w-44" data-testid="select-candidate-area">
+                  <SelectValue placeholder="Locality" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All {city} Localities</SelectItem>
+                  {availableAreas.map((a) => (
+                    <SelectItem key={a} value={a}>{a}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
             <Link href="/employer/applicants">
               <Button size="sm" variant="outline" className="hidden sm:inline-flex">
                 <Users className="mr-1.5 h-3.5 w-3.5" />
@@ -926,8 +948,11 @@ export function EmployerCandidates() {
       />
 
       <div className="mb-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <span>
-          <strong>Pro-tip:</strong> Verified workers who opted into discovery appear below. You can send them an in-app hiring invitation to apply. To chat with existing applicants, review them in the <strong>Applicants</strong> tab.
+        <span className="flex items-center gap-1.5">
+          <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+          <span>
+            <strong>Privacy Protection:</strong> Candidates appear under cryptographic handles (e.g. <code>FW-492E4A</code>) to protect worker phone numbers and identity until invited or unlocked.
+          </span>
         </span>
         <Link href="/employer/applicants" className="font-semibold text-primary underline shrink-0">
           Go to Applicants &rarr;
@@ -937,19 +962,27 @@ export function EmployerCandidates() {
       {list.length === 0 ? (
         <EmptyState
           icon={UsersRound}
-          title="No discoverable candidates found in this region"
-          body="Workers must enable discoverability in their profile to appear here. Try selecting 'All Regions & Areas' to view all active candidates."
+          title={`No discoverable candidates found in ${area !== 'all' ? area : city !== 'all' ? city : 'this region'}`}
+          body="Workers must enable discoverability in their profile to appear here. If testing with a real Worker account, verify discoverability is ON."
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {list.map((c, i) => (
-            <article key={c.id} className="rise rounded-xl border bg-card p-4" style={{ animationDelay: `${i * 40}ms` }} data-testid={`card-candidate-${c.id}`}>
-              <div className="flex items-center justify-between"><span className="rounded bg-tarmac px-2 py-1 font-mono text-sm font-bold text-plate">{c.code}</span></div>
-              <p className="mt-3 text-sm font-semibold">{c.area}</p>
-              <p className="text-xs text-muted-foreground">{c.experience} · {c.vehicle}{c.own_vehicle ? ' (own)' : ''}</p>
-              <div className="mt-3 flex flex-wrap gap-1">{c.skills.map((s) => <span key={s} className="rounded bg-muted px-1.5 py-0.5 text-[11px]">{s}</span>)}</div>
-              <p className="mt-2 text-[11px] text-muted-foreground">{c.languages.join(', ')}</p>
-              <div className="mt-3 flex items-center justify-between border-t border-dashed pt-3">
+            <article key={c.id} className="rise rounded-xl border bg-card p-4 space-y-3" style={{ animationDelay: `${i * 40}ms` }} data-testid={`card-candidate-${c.id}`}>
+              <div className="flex items-center justify-between">
+                <span className="rounded bg-tarmac px-2 py-1 font-mono text-sm font-bold text-plate">{c.code}</span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-600">
+                  <ShieldCheck className="h-3 w-3" />
+                  Masked ID
+                </span>
+              </div>
+              <div>
+                <p className="text-sm font-semibold">{c.area}</p>
+                <p className="text-xs text-muted-foreground">{c.experience} · {c.vehicle}{c.own_vehicle ? ' (own vehicle)' : ''}</p>
+              </div>
+              <div className="flex flex-wrap gap-1">{c.skills.map((s) => <span key={s} className="rounded bg-muted px-1.5 py-0.5 text-[11px]">{s}</span>)}</div>
+              <p className="text-[11px] text-muted-foreground">{c.languages.join(', ')}</p>
+              <div className="flex items-center justify-between border-t border-dashed pt-3">
                 <span className={cn('text-xs font-medium', c.available ? 'text-signal' : 'text-muted-foreground')}>{c.available ? 'Available now' : 'Not available'}</span>
                 <Button size="sm" variant="outline" onClick={() => setInviting(c)} data-testid={`button-invite-${c.id}`}>
                   <Send className="mr-1 h-3.5 w-3.5" />Invite
@@ -970,6 +1003,7 @@ export function EmployerCandidates() {
 }
 
 export function EmployerBilling() {
+  const { orgName } = useEmployer();
   const pricingModels = [
     {
       name: 'Standard Job Posting',
@@ -1000,7 +1034,7 @@ export function EmployerBilling() {
   return (
     <div>
       <PageHeader
-        eyebrow={COMPANY}
+        eyebrow={`${orgName} · employer`}
         title="Billing & Pricing"
         description="Official PRD baseline pricing. Real payments remain strictly disabled during pre-production."
       />
@@ -1059,6 +1093,7 @@ type InviteForm = z.infer<typeof inviteSchema>;
 
 export function EmployerTeam() {
   const { state, actions } = usePilot();
+  const { orgName } = useEmployer();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const form = useForm<InviteForm>({ resolver: zodResolver(inviteSchema), defaultValues: { name: '', role: 'Recruiter' } });
@@ -1069,7 +1104,7 @@ export function EmployerTeam() {
   };
   return (
     <div className="max-w-3xl">
-      <PageHeader eyebrow={COMPANY} title="Team" description="Manage recruiting collaborators and hiring managers for your organization."
+      <PageHeader eyebrow={`${orgName} · employer`} title="Team" description="Manage recruiting collaborators and hiring managers for your organization."
         actions={<Button onClick={() => setOpen(true)} data-testid="button-invite-member"><UserPlus className="mr-1.5 h-4 w-4" />Invite</Button>} />
       {state.team.length === 0 ? <EmptyState icon={Users} title="No teammates" body="Invite a recruiter to help review applicants." /> : (
         <ul className="divide-y rounded-xl border bg-card">

@@ -165,7 +165,7 @@ export function PilotProvider({ children }: { children: ReactNode }) {
     },
     inviteMember: (name, role) => {
       setState((s) => ({ ...s, team: [...s.team, { id: uid('tm'), name, role, status: 'invited' }] }));
-      log('Ghar-Tak Parcels', 'team.invite', name);
+      log('Employer', 'team.invite', name);
     },
     removeMember: (id) => setState((s) => ({ ...s, team: s.team.filter((m) => m.id !== id) })),
     reset: () => {

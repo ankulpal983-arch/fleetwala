@@ -376,12 +376,13 @@ export async function toggleLiveSavedJob(jobId: string, currentSaved: boolean): 
 }
 
 /** Fetch candidate discovery preview via secure RPC (exposes zero PII) */
-export async function discoverLiveCandidates(city?: string, category?: string): Promise<Candidate[] | null> {
+export async function discoverLiveCandidates(city?: string, area?: string, category?: string): Promise<Candidate[] | null> {
   const c = getSupabase();
   if (!c) return null;
 
   const { data, error } = await c.rpc('discover_workers', {
     p_city: city && city !== 'all' ? city : null,
+    p_area: area && area !== 'all' ? area : null,
     p_category: category || null,
     p_experience: null,
     p_limit: 20,
@@ -393,18 +394,27 @@ export async function discoverLiveCandidates(city?: string, category?: string): 
     return null;
   }
 
-  return data.map((item: any) => ({
-    id: item.candidate_handle,
-    code: `FW-${item.candidate_handle.slice(0, 6).toUpperCase()}`,
-    city: item.city || 'Bengaluru',
-    area: 'Local Area (Verified)',
-    experience: fromDbExperience(item.experience_band),
-    vehicle: fromDbVehicle(item.vehicle_type),
-    own_vehicle: true,
-    available: true,
-    languages: ['Hindi', 'English'],
-    skills: ['Local navigation', 'Smartphone literate', 'Delivery'],
-  }));
+  return data.map((item: any) => {
+    let displayArea = item.city || 'Verified Location';
+    if (item.area && item.city && item.area !== item.city) {
+      displayArea = `${item.area}, ${item.city}`;
+    } else if (item.area) {
+      displayArea = item.area;
+    }
+
+    return {
+      id: item.candidate_handle,
+      code: `FW-${item.candidate_handle.slice(0, 6).toUpperCase()}`,
+      city: item.city || 'Delhi NCR',
+      area: displayArea,
+      experience: fromDbExperience(item.experience_band),
+      vehicle: fromDbVehicle(item.vehicle_type),
+      own_vehicle: item.has_own_vehicle ?? true,
+      available: true,
+      languages: ['Hindi', 'English'],
+      skills: ['Local navigation', 'Smartphone literate', 'Delivery'],
+    };
+  });
 }
 
 /** Submit a job draft for moderation */

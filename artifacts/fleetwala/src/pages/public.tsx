@@ -48,8 +48,8 @@ export function Welcome() {
         <div className="rise relative" style={{ animationDelay: '120ms' }}>
           <img src={heroImg} alt="Illustration of a delivery rider and warehouse worker on a city street at dawn" className="aspect-[4/3] w-full rounded-2xl border-2 border-foreground object-cover" />
           <div className="absolute -bottom-5 -left-4 flex items-center gap-3 rounded-xl border-2 border-foreground bg-card p-3 shadow-lg">
-            <Monogram name="Ghar-Tak Parcels" size="sm" />
-            <div className="text-sm"><p className="font-bold">Parcel delivery partner</p><p className="text-xs text-muted-foreground">Bengaluru · Verified hiring partner</p></div>
+            <Monogram name="Logistics Partner" size="sm" />
+            <div className="text-sm"><p className="font-bold">Delivery partner</p><p className="text-xs text-muted-foreground">Delhi NCR · Verified hiring partner</p></div>
           </div>
         </div>
       </section>

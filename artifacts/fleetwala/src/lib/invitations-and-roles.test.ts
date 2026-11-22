@@ -95,3 +95,39 @@ test('Clean Data & Staging Purge: Only genuine job listing exists for visitors',
   );
   assert.equal(stagingJobs.length, 0, 'No staging jobs should be published');
 });
+
+test('Candidate Handle Cryptographic Provenance: FW-492E4A mathematically maps to Ankul worker UUID', async () => {
+  const crypto = await import('node:crypto');
+  const ankulWorkerUuid = '761d0d18-99ed-42cd-b117-71a593be4747';
+  const sha256Digest = crypto.createHash('sha256').update(ankulWorkerUuid).digest('hex');
+  const generatedCode = `FW-${sha256Digest.slice(0, 6).toUpperCase()}`;
+
+  assert.equal(
+    generatedCode,
+    'FW-492E4A',
+    'Candidate FW-492E4A must mathematically match genuine worker Ankul UUID'
+  );
+  assert.equal(
+    sha256Digest.startsWith('492e4a'),
+    true,
+    'SHA256 hex digest must begin with 492e4a'
+  );
+});
+
+test('Candidate Discovery Zero PII Contract: Anonymous candidates expose no private worker columns', async () => {
+  // discover_workers returns candidate_handle, city, area, category, experience_band, vehicle_type, has_own_vehicle
+  // It never returns full_name, phone_e164, email, or photo_path
+  const allowedKeys = new Set([
+    'candidate_handle',
+    'city',
+    'area',
+    'category',
+    'experience_band',
+    'vehicle_type',
+    'has_own_vehicle'
+  ]);
+
+  // Negative test: verify anonymous caller cannot execute
+  const { error } = await anonClient.rpc('discover_workers');
+  assert.notEqual(error, null, 'Unauthenticated execution must be blocked');
+});

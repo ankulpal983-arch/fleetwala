@@ -111,7 +111,7 @@ export function EmployerOnboardingPage() {
                   type="text"
                   value={legalName}
                   onChange={(e) => setLegalName(e.target.value)}
-                  placeholder="e.g. Ghar-Tak Parcels Pvt Ltd"
+                  placeholder="e.g. Express Fleet Logistics Pvt Ltd"
                   required
                   disabled={busy}
                   className="h-10 text-sm"
