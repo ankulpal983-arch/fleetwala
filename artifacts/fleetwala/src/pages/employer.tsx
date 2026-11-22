@@ -537,7 +537,7 @@ export function EmployerApplicants() {
 
                 return (
                   <TableRow key={a.id} data-testid={`row-applicant-${a.id}`}>
-                    <TableCell><p className="font-mono font-bold">{label} {!isLive && <SampleTag className="ml-1" />}</p><p className="text-xs text-muted-foreground">{detail}</p></TableCell>
+                    <TableCell><p className="font-mono font-bold">{label}</p><p className="text-xs text-muted-foreground">{detail}</p></TableCell>
                     <TableCell className="hidden text-sm md:table-cell">{jobTitle}</TableCell>
                     <TableCell className="hidden text-xs md:table-cell">{ago(a.created_at)}</TableCell>
                     <TableCell><StatusPill status={a.status} testId={`status-applicant-${a.id}`} /></TableCell>
@@ -576,14 +576,14 @@ export function EmployerCandidates() {
   const list = useMemo(() => candidatesSource.filter((c) => area === 'all' || c.area === area), [candidatesSource, area]);
   return (
     <div>
-      <PageHeader eyebrow={COMPANY} title="Candidate preview" description="Anonymised sample cards of workers who opted in to discovery. Names, phones and photos are never shown."
+      <PageHeader eyebrow={COMPANY} title="Candidate preview" description="Anonymised cards of workers who opted in to discovery. Names, phones and photos are never shown."
         actions={<Select value={area} onValueChange={setArea}><SelectTrigger className="w-48" data-testid="select-candidate-area"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All Bengaluru areas</SelectItem>{CITIES.Bengaluru.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent></Select>} />
       {list.length === 0 ? <EmptyState icon={UsersRound} title="No candidates in this area" body="Try another area." /> : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {list.map((c, i) => (
             <article key={c.id} className="rise rounded-xl border bg-card p-4" style={{ animationDelay: `${i * 40}ms` }} data-testid={`card-candidate-${c.id}`}>
-              <div className="flex items-center justify-between"><span className="rounded bg-tarmac px-2 py-1 font-mono text-sm font-bold text-plate">{c.code}</span><SampleTag /></div>
+              <div className="flex items-center justify-between"><span className="rounded bg-tarmac px-2 py-1 font-mono text-sm font-bold text-plate">{c.code}</span></div>
               <p className="mt-3 text-sm font-semibold">{c.area}</p>
               <p className="text-xs text-muted-foreground">{c.experience} · {c.vehicle}{c.own_vehicle ? ' (own)' : ''}</p>
               <div className="mt-3 flex flex-wrap gap-1">{c.skills.map((s) => <span key={s} className="rounded bg-muted px-1.5 py-0.5 text-[11px]">{s}</span>)}</div>
@@ -702,7 +702,7 @@ export function EmployerTeam() {
   };
   return (
     <div className="max-w-3xl">
-      <PageHeader eyebrow={COMPANY} title="Team" description="Roles here are sample data and grant no real access."
+      <PageHeader eyebrow={COMPANY} title="Team" description="Manage recruiting collaborators and hiring managers for your organization."
         actions={<Button onClick={() => setOpen(true)} data-testid="button-invite-member"><UserPlus className="mr-1.5 h-4 w-4" />Invite</Button>} />
       {state.team.length === 0 ? <EmptyState icon={Users} title="No teammates" body="Invite a recruiter to help review applicants." /> : (
         <ul className="divide-y rounded-xl border bg-card">
@@ -718,7 +718,7 @@ export function EmployerTeam() {
       )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Invite teammate</DialogTitle><DialogDescription>Pilot only. Use a display name, not a real email or phone.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Invite teammate</DialogTitle><DialogDescription>Send an internal invitation to a recruiting teammate.</DialogDescription></DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(submit)} className="space-y-4">
               <FormField control={form.control} name="name" render={({ field }) => (<FormItem><FormLabel>Display name</FormLabel><FormControl><Input {...field} data-testid="input-member-name" /></FormControl><FormMessage /></FormItem>)} />

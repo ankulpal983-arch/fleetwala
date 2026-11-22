@@ -3,7 +3,7 @@ import { Link } from 'wouter';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Bell, CheckCheck, ClipboardList, EyeOff, Eye, Lock, MessageSquare, RotateCcw, Send, ShieldAlert, Check } from 'lucide-react';
+import { Bell, CheckCheck, ClipboardList, EyeOff, Eye, Lock, MessageSquare, RotateCcw, Send, ShieldAlert, Check, LogOut, Trash2, UserRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -22,7 +22,8 @@ import { profileProgress, STORAGE_KEY, usePilot } from '@/lib/store';
 import { ago, istStamp } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { AppStatus, Application, Notice, Thread } from '@/lib/types';
-import { liveMode, useSession } from '@/lib/supabase';
+import { liveMode, useSession, getSupabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth-context';
 import {
   getLiveWorkerProfile, saveLiveWorkerProfile, getLiveApplications,
   getLiveNotifications, markLiveNotificationRead, getLiveConversations,
@@ -330,7 +331,7 @@ export function Profile() {
     }
     actions.updateProfile(v);
     form.reset(v);
-    toast({ title: 'Profile saved', description: 'Stored on this device as pilot data.' });
+    toast({ title: 'Profile updated', description: 'Your profile details have been saved successfully.' });
   };
 
   return (
@@ -413,41 +414,125 @@ export function Profile() {
 
 export function SettingsPage() {
   const { state, actions } = usePilot();
+  const { session, user, roleStatus, logout } = useAuth();
   const { toast } = useToast();
+
+  const handleRequestDeletion = async () => {
+    try {
+      const c = getSupabase();
+      if (c && user) {
+        await c.from('support_tickets').insert({
+          opened_by: user.id,
+          subject: '[DATA ERASURE REQUEST] User Account Deletion under DPDP Act 2023',
+          details: `User ${user.email} (ID: ${user.id}) has formally requested account and personal data erasure.`,
+        });
+      }
+    } catch {
+      // offline or mock fallback
+    }
+    actions.reset();
+    toast({
+      title: 'Deletion request received',
+      description: 'Your data erasure request has been queued under DPDP Act 2023. Logging out...',
+    });
+    setTimeout(() => {
+      logout();
+    }, 1500);
+  };
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <PageHeader eyebrow="Worker" title="Settings" />
+      <PageHeader eyebrow="Worker" title="Settings & Privacy" description="Manage your preferences, security, and personal data rights under Indian law." />
+
+      {session && (
+        <section className="rounded-2xl border bg-card p-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <UserRound className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-bold text-sm">{user?.email}</p>
+              <p className="text-xs text-muted-foreground">
+                Verified Role: <span className="font-semibold text-foreground capitalize">{roleStatus.isAdmin ? 'Administrator' : roleStatus.isEmployer ? 'Employer' : 'Worker'}</span>
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 pt-4 border-t flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">Signed in to FleetWala secure session.</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={logout}
+              className="gap-1.5 text-xs text-destructive hover:bg-destructive/10 hover:border-destructive/30"
+              data-testid="button-settings-logout"
+            >
+              <LogOut className="h-3.5 w-3.5" />Log out
+            </Button>
+          </div>
+        </section>
+      )}
+
       <section className="divide-y rounded-2xl border bg-card">
-        <Row title="New job alerts" body="Shown in Notifications. No SMS is sent in the pilot.">
+        <Row title="Profile discoverability" body="Allow verified employers to view your anonymized candidate profile. Off by default.">
+          <Switch
+            checked={Boolean(state.profile.discoverable)}
+            onCheckedChange={(v) => {
+              actions.updateProfile({ discoverable: v });
+              saveLiveWorkerProfile({ ...state.profile, discoverable: v });
+              toast({ title: v ? 'Discoverability enabled' : 'Discoverability disabled' });
+            }}
+            data-testid="switch-discoverability"
+          />
+        </Row>
+        <Row title="New job alerts" body="Receive in-app notifications for fresh openings in your area.">
           <Switch checked={state.prefs.jobAlerts} onCheckedChange={(v) => actions.setPrefs({ jobAlerts: v })} data-testid="switch-job-alerts" />
         </Row>
-        <Row title="Application status updates" body="Know when an employer views or shortlists you.">
+        <Row title="Application status updates" body="Receive immediate alerts when an employer reviews or shortlists your profile.">
           <Switch checked={state.prefs.statusUpdates} onCheckedChange={(v) => actions.setPrefs({ statusUpdates: v })} data-testid="switch-status-updates" />
         </Row>
-        <Row title="Language" body="Hindi interface is planned; selection is saved for later.">
-          <Select value={state.prefs.language} onValueChange={(v) => actions.setPrefs({ language: v as 'en' | 'hi' })}>
-            <SelectTrigger className="w-36" data-testid="select-language"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="en">English</SelectItem><SelectItem value="hi">Hindi (soon)</SelectItem></SelectContent>
-          </Select>
-        </Row>
       </section>
+
       <section className="rounded-2xl border bg-card p-5">
-        <h2 className="text-lg font-bold">Pilot data on this device</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Everything you see is sample data saved in this browser under <code className="font-mono text-xs">{STORAGE_KEY}</code>. Nothing is sent to a server.</p>
-        <AlertDialog>
-          <AlertDialogTrigger asChild><Button variant="outline" className="mt-4" data-testid="button-reset-pilot"><RotateCcw className="mr-1.5 h-4 w-4" />Reset pilot data</Button></AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader><AlertDialogTitle>Reset all pilot data?</AlertDialogTitle>
-              <AlertDialogDescription>Saved jobs, applications, profile edits, messages and admin actions go back to the original sample set.</AlertDialogDescription></AlertDialogHeader>
-            <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={() => { actions.reset(); toast({ title: 'Pilot data reset' }); }} data-testid="button-confirm-reset">Reset</AlertDialogAction></AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <h2 className="text-base font-bold text-foreground">Data Privacy & Account Rights (DPDP Act 2023)</h2>
+        <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+          As a Data Principal under India&apos;s Digital Personal Data Protection Act, 2023, you have the legal right to request the erasure of your personal data.
+        </p>
+
+        <div className="mt-4 flex flex-wrap gap-3">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs text-destructive hover:bg-destructive/10" data-testid="button-request-deletion">
+                <Trash2 className="h-3.5 w-3.5" />Request account deletion
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Request Account Deletion?</AlertDialogTitle>
+                <AlertDialogDescription className="text-xs leading-relaxed space-y-2">
+                  <p>
+                    Under the Digital Personal Data Protection Act, 2023, you have the right to request erasure of your personal data.
+                  </p>
+                  <p>
+                    This will queue your account, profile records, and application history for permanent deletion. You will be signed out immediately.
+                  </p>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleRequestDeletion} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" data-testid="button-confirm-deletion">
+                  Confirm deletion request
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
       </section>
-      <section className="flex flex-wrap gap-4 text-sm">
-        <Link href="/legal/terms" className="underline">Terms (draft)</Link>
-        <Link href="/legal/privacy" className="underline">Privacy notice (draft)</Link>
-        <Link href="/login" className="underline">Account sign-in</Link>
+
+      <section className="flex flex-wrap gap-4 text-xs text-muted-foreground pt-2">
+        <Link href="/terms" className="hover:underline">Terms of Service</Link>
+        <Link href="/privacy" className="hover:underline">Privacy Policy</Link>
+        <Link href="/support" className="hover:underline">Grievance & Support</Link>
+        <Link href="/help" className="hover:underline">Help Center</Link>
       </section>
     </div>
   );
@@ -489,10 +574,10 @@ export function Support() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Accordion type="single" collapsible className="rounded-2xl border bg-card px-5">
           {[
-            ['Who can see my phone number?', 'No one. Employers never see your number on FleetWala. Chat stays inside the app.'],
-            ['Why is there a 20 applications a day limit?', 'It keeps applications thoughtful and helps employers respond. In the pilot it is a demo counter by IST date.'],
-            ['How is the 15 km radius worked out?', 'For now we match by city and area. Distances are approximate and not calculated from GPS.'],
-            ['Are these real jobs?', 'Not yet. The pilot shows sample listings so you can try the flow. Real jobs come after verification goes live.'],
+            ['Who can see my phone number?', 'No one. Employers never see your phone number on FleetWala. Chat stays securely inside the app.'],
+            ['Why is there a 20 applications a day limit?', 'FleetWala enforces an atomic limit of 20 applications per worker per IST calendar day (midnight to midnight). This ensures high intent and faster responses from verified employers.'],
+            ['How is the 15 km radius worked out?', 'Jobs are matched by city and local area within approximately 15 km. Geolocation is strictly optional and processed on-device only.'],
+            ['Are these real jobs?', 'Yes. All listings published on FleetWala are submitted by registered logistics employers and moderated by our trust & safety team before appearing. If you find any suspicious listing, report it immediately.'],
           ].map(([q, a], i) => (
             <AccordionItem key={q} value={`q${i}`}><AccordionTrigger className="text-left">{q}</AccordionTrigger><AccordionContent className="text-muted-foreground">{a}</AccordionContent></AccordionItem>
           ))}

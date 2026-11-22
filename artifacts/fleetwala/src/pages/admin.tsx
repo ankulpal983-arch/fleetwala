@@ -48,14 +48,14 @@ function useAdminAccess() {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (liveMode && session) {
+    if (session) {
       checkIsLiveAdmin().then(setIsAdmin);
     } else {
-      setIsAdmin(true); // fallback in unauthenticated or pilot mode
+      setIsAdmin(false);
     }
   }, [session]);
 
-  return { isAdmin, isLive: liveMode && Boolean(session) };
+  return { isAdmin, isLive: Boolean(session) };
 }
 
 function AdminNote() {
@@ -79,7 +79,7 @@ export function AdminOverview() {
     }
   }, [isLive, isAdmin]);
 
-  if (isLive && isAdmin === false) {
+  if (!isLive || isAdmin === false) {
     return <AdminAccessDenied />;
   }
 
@@ -146,7 +146,7 @@ export function AdminJobs() {
     refreshJobs();
   }, [isLive, isAdmin]);
 
-  if (isLive && isAdmin === false) {
+  if (!isLive || isAdmin === false) {
     return <AdminAccessDenied />;
   }
 
@@ -250,7 +250,7 @@ export function AdminEmployers() {
     refreshEmployers();
   }, [isLive, isAdmin]);
 
-  if (isLive && isAdmin === false) {
+  if (!isLive || isAdmin === false) {
     return <AdminAccessDenied />;
   }
 
@@ -325,7 +325,7 @@ export function AdminAudit() {
   const { isAdmin, isLive } = useAdminAccess();
   const [q, setQ] = useState('');
 
-  if (isLive && isAdmin === false) {
+  if (!isLive || isAdmin === false) {
     return <AdminAccessDenied />;
   }
 
@@ -354,7 +354,7 @@ export function AdminSupport() {
   const { state, actions } = usePilot();
   const { isAdmin, isLive } = useAdminAccess();
 
-  if (isLive && isAdmin === false) {
+  if (!isLive || isAdmin === false) {
     return <AdminAccessDenied />;
   }
 

@@ -5,14 +5,19 @@ const path = require('path');
 
 const routesToTest = [
   { url: 'http://localhost:3000/', name: 'homepage', expectedText: 'Find local jobs' },
+  { url: 'http://localhost:3000/welcome', name: 'welcome', expectedText: 'Local work' },
   { url: 'http://localhost:3000/login', name: 'login', expectedText: 'Sign in to FleetWala' },
   { url: 'http://localhost:3000/signup', name: 'signup', expectedText: 'Join FleetWala' },
   { url: 'http://localhost:3000/verify-email', name: 'verify-email', expectedText: 'Check your email' },
   { url: 'http://localhost:3000/forgot-password', name: 'forgot-password', expectedText: 'Reset your password' },
   { url: 'http://localhost:3000/onboarding/worker', name: 'onboarding-worker', expectedText: 'Worker Profile' },
   { url: 'http://localhost:3000/onboarding/employer', name: 'onboarding-employer', expectedText: 'Register Company' },
-  { url: 'http://localhost:3000/employer', name: 'employer-dashboard', expectedText: 'Hiring overview' },
-  { url: 'http://localhost:3000/admin', name: 'admin-portal', expectedText: 'Access Denied' }
+  { url: 'http://localhost:3000/employer', name: 'employer-dashboard', expectedText: 'Employer Workspace' },
+  { url: 'http://localhost:3000/admin', name: 'admin-portal', expectedText: 'Administrator Access Denied' },
+  { url: 'http://localhost:3000/privacy', name: 'privacy', expectedText: 'Privacy Policy' },
+  { url: 'http://localhost:3000/terms', name: 'terms', expectedText: 'Terms of Service' },
+  { url: 'http://localhost:3000/support', name: 'support', expectedText: 'Help, Grievance & Support' },
+  { url: 'http://localhost:3000/help', name: 'help', expectedText: 'Help Center' }
 ];
 
 async function runTestSuite() {

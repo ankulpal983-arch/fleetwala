@@ -22,12 +22,8 @@ export function Monogram({ name, size = 'md' }: { name: string; size?: 'sm' | 'm
   );
 }
 
-export function SampleTag({ className }: { className?: string }) {
-  return (
-    <span className={cn('inline-flex items-center rounded border border-dashed border-muted-foreground/50 px-1.5 py-px font-mono text-[10px] uppercase tracking-wider text-muted-foreground', className)}>
-      Sample
-    </span>
-  );
+export function SampleTag(_props: { className?: string }) {
+  return null;
 }
 
 const TONES: Record<string, string> = {

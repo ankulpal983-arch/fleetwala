@@ -53,6 +53,33 @@ const app = (id: string, job_id: string, candidate_id: string, path: AppStatus[]
   return { id, job_id, candidate_id, status: path[path.length - 1], created_at: history[0].at, history };
 };
 
+export function makeEmptyState(): PilotState {
+  return {
+    version: 1,
+    jobs: [],
+    applications: [],
+    saved: [],
+    profile: {
+      first_name: '',
+      city: 'Bengaluru',
+      area: '',
+      experience: 'Fresher',
+      vehicle: 'Two-wheeler',
+      own_vehicle: false,
+      available: true,
+      discoverable: false,
+    },
+    candidates: [],
+    employers: [],
+    tickets: [],
+    notifications: [],
+    threads: [],
+    audit: [],
+    team: [],
+    prefs: { jobAlerts: true, statusUpdates: true, language: 'en' },
+  };
+}
+
 export function makeSeed(): PilotState {
   return {
     version: 1,

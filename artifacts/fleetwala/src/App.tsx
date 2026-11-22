@@ -7,12 +7,15 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { Shell } from '@/components/shell';
 import { PilotProvider } from '@/lib/store';
+import { AuthProvider } from '@/lib/auth-context';
 import { gate } from '@/lib/supabase';
+import { ProtectedAdminRoute, ProtectedEmployerRoute, ProtectedWorkerRoute } from '@/components/route-guards';
 import { FindJobs, JobDetail, SavedJobs } from '@/pages/worker-jobs';
 import { Applications, Messages, Notifications, Profile, SettingsPage, Support } from '@/pages/worker-more';
 import { EmployerApplicants, EmployerBilling, EmployerCandidates, EmployerJobs, EmployerOverview, EmployerTeam } from '@/pages/employer';
 import { AdminAudit, AdminEmployers, AdminJobs, AdminOverview, AdminSupport } from '@/pages/admin';
 import { Legal, LiveSetup, Welcome } from '@/pages/public';
+import { PrivacyPage, TermsPage, SupportPage, HelpPage } from '@/pages/legal';
 import { LoginPage } from '@/pages/auth/login';
 import { SignupPage } from '@/pages/auth/signup';
 import { VerifyEmailPage } from '@/pages/auth/verify-email';
@@ -22,7 +25,15 @@ import { AuthCallbackPage } from '@/pages/auth/callback';
 import { WorkerOnboardingPage } from '@/pages/onboarding/worker-onboarding';
 import { EmployerOnboardingPage } from '@/pages/onboarding/employer-onboarding';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+      staleTime: 30000,
+    },
+  },
+});
 
 function isPublic(loc: string) {
   return (
@@ -35,6 +46,12 @@ function isPublic(loc: string) {
     loc === '/auth/callback' ||
     loc === '/onboarding/worker' ||
     loc === '/onboarding/employer' ||
+    loc === '/privacy' ||
+    loc === '/terms' ||
+    loc === '/support' ||
+    loc === '/contact' ||
+    loc === '/help' ||
+    loc === '/faq' ||
     loc.startsWith('/legal')
   );
 }
@@ -45,17 +62,19 @@ function Router() {
     const titles: Record<string, string> = {
       '/': 'Find local jobs', '/saved': 'Saved jobs', '/applications': 'My applications',
       '/messages': 'Messages', '/notifications': 'Notifications', '/profile': 'My profile',
-      '/settings': 'Privacy and settings', '/support': 'Help and safety',
+      '/settings': 'Privacy and settings', '/support': 'Help, grievance and safety',
+      '/contact': 'Contact support', '/help': 'Help center', '/faq': 'Frequently asked questions',
       '/employer': 'Hiring overview', '/employer/jobs': 'Manage jobs',
-      '/employer/applicants': 'Applicants', '/employer/candidates': 'Anonymous candidates',
-      '/employer/billing': 'Billing disabled', '/employer/team': 'Employer team',
+      '/employer/applicants': 'Applicants', '/employer/candidates': 'Candidate discovery',
+      '/employer/billing': 'Billing policy', '/employer/team': 'Employer team',
       '/admin': 'Trust overview', '/admin/jobs': 'Job moderation',
       '/admin/employers': 'Employer verification', '/admin/audit': 'Audit log',
       '/admin/support': 'Support queue', '/welcome': 'Local logistics hiring',
       '/login': 'Sign in', '/signup': 'Create account', '/verify-email': 'Verify your email',
       '/forgot-password': 'Reset password', '/reset-password': 'Set new password',
       '/auth/callback': 'Signing in', '/onboarding/worker': 'Worker setup',
-      '/onboarding/employer': 'Employer setup', '/legal/terms': 'Terms of service',
+      '/onboarding/employer': 'Employer setup', '/terms': 'Terms of service',
+      '/privacy': 'Privacy policy', '/legal/terms': 'Terms of service',
       '/legal/privacy': 'Privacy policy',
     };
     const title = `${titles[loc] ?? (loc.startsWith('/jobs/') ? 'Job details' : 'Page not found')} · FleetWala`;
@@ -79,6 +98,12 @@ function Router() {
           <Route path="/auth/callback" component={AuthCallbackPage} />
           <Route path="/onboarding/worker" component={WorkerOnboardingPage} />
           <Route path="/onboarding/employer" component={EmployerOnboardingPage} />
+          <Route path="/privacy" component={PrivacyPage} />
+          <Route path="/terms" component={TermsPage} />
+          <Route path="/support" component={SupportPage} />
+          <Route path="/contact" component={SupportPage} />
+          <Route path="/help" component={HelpPage} />
+          <Route path="/faq" component={HelpPage} />
           <Route path="/legal/:doc" component={Legal} />
           <Route component={NotFound} />
         </Switch>
@@ -95,24 +120,64 @@ function Router() {
         <Switch>
           <Route path="/" component={FindJobs} />
           <Route path="/jobs/:id" component={JobDetail} />
-          <Route path="/saved" component={SavedJobs} />
-          <Route path="/applications" component={Applications} />
-          <Route path="/messages" component={Messages} />
-          <Route path="/notifications" component={Notifications} />
-          <Route path="/profile" component={Profile} />
-          <Route path="/settings" component={SettingsPage} />
-          <Route path="/support" component={Support} />
-          <Route path="/employer" component={EmployerOverview} />
-          <Route path="/employer/jobs" component={EmployerJobs} />
-          <Route path="/employer/applicants" component={EmployerApplicants} />
-          <Route path="/employer/candidates" component={EmployerCandidates} />
-          <Route path="/employer/billing" component={EmployerBilling} />
-          <Route path="/employer/team" component={EmployerTeam} />
-          <Route path="/admin" component={AdminOverview} />
-          <Route path="/admin/jobs" component={AdminJobs} />
-          <Route path="/admin/employers" component={AdminEmployers} />
-          <Route path="/admin/audit" component={AdminAudit} />
-          <Route path="/admin/support" component={AdminSupport} />
+
+          {/* Protected Worker Routes */}
+          <Route path="/saved">
+            <ProtectedWorkerRoute><SavedJobs /></ProtectedWorkerRoute>
+          </Route>
+          <Route path="/applications">
+            <ProtectedWorkerRoute><Applications /></ProtectedWorkerRoute>
+          </Route>
+          <Route path="/messages">
+            <ProtectedWorkerRoute><Messages /></ProtectedWorkerRoute>
+          </Route>
+          <Route path="/notifications">
+            <ProtectedWorkerRoute><Notifications /></ProtectedWorkerRoute>
+          </Route>
+          <Route path="/profile">
+            <ProtectedWorkerRoute><Profile /></ProtectedWorkerRoute>
+          </Route>
+          <Route path="/settings">
+            <ProtectedWorkerRoute><SettingsPage /></ProtectedWorkerRoute>
+          </Route>
+
+          {/* Protected Employer Routes */}
+          <Route path="/employer">
+            <ProtectedEmployerRoute><EmployerOverview /></ProtectedEmployerRoute>
+          </Route>
+          <Route path="/employer/jobs">
+            <ProtectedEmployerRoute><EmployerJobs /></ProtectedEmployerRoute>
+          </Route>
+          <Route path="/employer/applicants">
+            <ProtectedEmployerRoute><EmployerApplicants /></ProtectedEmployerRoute>
+          </Route>
+          <Route path="/employer/candidates">
+            <ProtectedEmployerRoute><EmployerCandidates /></ProtectedEmployerRoute>
+          </Route>
+          <Route path="/employer/billing">
+            <ProtectedEmployerRoute><EmployerBilling /></ProtectedEmployerRoute>
+          </Route>
+          <Route path="/employer/team">
+            <ProtectedEmployerRoute><EmployerTeam /></ProtectedEmployerRoute>
+          </Route>
+
+          {/* Protected Admin Routes */}
+          <Route path="/admin">
+            <ProtectedAdminRoute><AdminOverview /></ProtectedAdminRoute>
+          </Route>
+          <Route path="/admin/jobs">
+            <ProtectedAdminRoute><AdminJobs /></ProtectedAdminRoute>
+          </Route>
+          <Route path="/admin/employers">
+            <ProtectedAdminRoute><AdminEmployers /></ProtectedAdminRoute>
+          </Route>
+          <Route path="/admin/audit">
+            <ProtectedAdminRoute><AdminAudit /></ProtectedAdminRoute>
+          </Route>
+          <Route path="/admin/support">
+            <ProtectedAdminRoute><AdminSupport /></ProtectedAdminRoute>
+          </Route>
+
           <Route component={NotFound} />
         </Switch>
       </RoutedErrorBoundary>
@@ -131,9 +196,11 @@ function App() {
       <TooltipProvider>
         <PilotProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-            <Router />
+            <AuthProvider>
+              <Router />
+              <Toaster />
+            </AuthProvider>
           </WouterRouter>
-          <Toaster />
         </PilotProvider>
       </TooltipProvider>
     </QueryClientProvider>

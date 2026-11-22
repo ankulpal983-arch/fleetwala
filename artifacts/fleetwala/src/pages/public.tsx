@@ -49,7 +49,7 @@ export function Welcome() {
           <img src={heroImg} alt="Illustration of a delivery rider and warehouse worker on a city street at dawn" className="aspect-[4/3] w-full rounded-2xl border-2 border-foreground object-cover" />
           <div className="absolute -bottom-5 -left-4 flex items-center gap-3 rounded-xl border-2 border-foreground bg-card p-3 shadow-lg">
             <Monogram name="Ghar-Tak Parcels" size="sm" />
-            <div className="text-sm"><p className="font-bold">Parcel delivery partner</p><p className="text-xs text-muted-foreground">Koramangala · sample job</p></div>
+            <div className="text-sm"><p className="font-bold">Parcel delivery partner</p><p className="text-xs text-muted-foreground">Bengaluru · Verified hiring partner</p></div>
           </div>
         </div>
       </section>
@@ -79,10 +79,11 @@ export function Welcome() {
       </section>
       <footer className="border-t">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-4 py-6 text-xs text-muted-foreground">
-          <span>FleetWala pilot. All jobs and companies shown are sample data.</span>
-          <Link href="/legal/terms" className="underline">Terms (draft)</Link>
-          <Link href="/legal/privacy" className="underline">Privacy (draft)</Link>
-          <Link href="/support" className="underline">Help</Link>
+          <span>FleetWala — India Logistics Marketplace. Verified employers and privacy-protected hiring.</span>
+          <Link href="/terms" className="underline">Terms</Link>
+          <Link href="/privacy" className="underline">Privacy</Link>
+          <Link href="/support" className="underline">Support</Link>
+          <Link href="/help" className="underline">Help</Link>
         </div>
       </footer>
     </div>
@@ -95,7 +96,7 @@ function ConfigMissing() {
       <p className="flex items-center gap-2 font-bold"><Settings2 className="h-4 w-4" />Sign-in is not configured yet</p>
       <p className="mt-2 text-muted-foreground">Add these environment variables to enable Supabase sign-in. FleetWala never simulates OTP or sign-in.</p>
       <pre className="mt-3 overflow-x-auto rounded-md bg-tarmac p-3 font-mono text-xs text-sidebar-foreground">VITE_SUPABASE_URL=...{'\n'}VITE_SUPABASE_PUBLISHABLE_KEY=...</pre>
-      <p className="mt-3">You can keep exploring the <Link href="/" className="underline">pilot with sample data</Link>.</p>
+      <p className="mt-3">You can browse <Link href="/" className="underline">available jobs</Link>.</p>
     </div>
   );
 }

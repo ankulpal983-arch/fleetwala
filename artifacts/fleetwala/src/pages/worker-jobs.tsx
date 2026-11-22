@@ -279,38 +279,16 @@ export function JobDetail() {
   const [confirm, setConfirm] = useState(false);
 
   useEffect(() => {
-    if (liveMode && session && id) {
-      const c = getSupabase();
-      if (c) {
-        c.from('jobs').select('*').eq('id', id).maybeSingle().then(({ data }) => {
-          if (data) {
-            setLiveJob({
-              id: data.id,
-              employer_id: data.employer_id,
-              title: data.title,
-              company: 'Verified Logistics Partner',
-              city: data.city,
-              area: data.area || 'Central',
-              category: data.category as any,
-              min_salary: data.salary_min_inr || 18000,
-              max_salary: data.salary_max_inr || 24000,
-              shift: 'Morning & General',
-              vehicle: data.requires_driving_licence ? 'Two-wheeler with licence' : 'Any vehicle',
-              fuel_allowance: true,
-              licence_required: data.requires_driving_licence || false,
-              experience: '1-3 years',
-              description: data.description,
-              openings: 5,
-              status: (data.state === 'published' ? 'approved' : data.state) as JobStatus,
-              expires_at: data.expires_at || new Date(Date.now() + 30 * 86400000).toISOString(),
-              created_at: data.created_at,
-              moderation_note: data.review_note,
-            });
-          }
-        });
-      }
+    let active = true;
+    if (liveMode && id) {
+      getLiveJobs().then((jobs) => {
+        if (!active) return;
+        const match = jobs.find((j) => j.id === id);
+        if (match) setLiveJob(match);
+      });
     }
-  }, [id, session]);
+    return () => { active = false; };
+  }, [id]);
 
   const job = liveMode ? liveJob : state.jobs.find((j) => j.id === id);
 
@@ -322,13 +300,20 @@ export function JobDetail() {
   const p = state.profile;
 
   const doApply = async () => {
-    if (liveMode && session) {
+    if (!session) {
+      toast({
+        title: 'Sign in required',
+        description: 'Please sign in or create a free worker account to apply.',
+      });
+      return;
+    }
+    if (liveMode) {
       const res = await applyToLiveJob(job.id);
       if (res.ok) {
         actions.apply(job.id);
         toast({
           title: 'Application sent',
-          description: res.data?.wasExisting ? 'Already applied previously.' : 'Recorded in staging database via apply_to_job RPC.',
+          description: res.data?.wasExisting ? 'Already applied previously.' : 'Recorded in database via apply_to_job RPC.',
         });
       } else {
         toast({
@@ -369,7 +354,7 @@ export function JobDetail() {
           <div>
             <h2 className="text-lg font-bold">About the work</h2>
             <p className="mt-2 leading-relaxed text-foreground/85">{job.description}</p>
-            <p className="mt-4 text-xs text-muted-foreground">Posted {ago(job.created_at)}. Sample listing for the pilot; not a real vacancy.</p>
+            <p className="mt-4 text-xs text-muted-foreground">Posted {ago(job.created_at)}.</p>
             <div className="mt-5 rounded-xl border border-chart-4/30 bg-chart-4/5 p-4 text-sm">
               <p className="font-semibold">Never pay to get a job</p>
               <p className="mt-1 text-muted-foreground">Genuine employers on FleetWala do not ask for deposits, fees or ID photos in chat. <Link href="/support" className="underline">Report a concern</Link>.</p>
@@ -387,7 +372,7 @@ export function JobDetail() {
             <Button variant="outline" className="w-full" onClick={() => actions.toggleSave(job.id)} data-testid="button-save-detail">
               {saved ? <><BookmarkCheck className="mr-1.5 h-4 w-4" />Saved</> : <><Bookmark className="mr-1.5 h-4 w-4" />Save for later</>}
             </Button>
-            <p className="text-center font-mono text-[11px] text-muted-foreground">{usageToday}/{DAILY_LIMIT} applications today (IST, demo)</p>
+            <p className="text-center font-mono text-[11px] text-muted-foreground">{usageToday}/{DAILY_LIMIT} applications today (IST)</p>
           </div>
         </div>
       </div>
@@ -405,7 +390,7 @@ export function JobDetail() {
                   <li><span className="text-muted-foreground">Experience</span><br />{p.experience || 'Not set'}</li>
                   <li><span className="text-muted-foreground">Vehicle</span><br />{p.vehicle || 'Not set'}</li>
                 </ul>
-                <p className="flex items-center gap-1.5"><ShieldCheck className="h-4 w-4 text-signal" />Your phone number stays hidden. Pilot data only.</p>
+                <p className="flex items-center gap-1.5"><ShieldCheck className="h-4 w-4 text-signal" />Your phone number stays hidden.</p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
 import {
   Bell, Bookmark, Building2, ChevronDown, ClipboardList, CreditCard, FileClock, Gavel, LayoutDashboard, LifeBuoy,
-  ListChecks, LogIn, MessageSquare, Search, Settings, ShieldCheck, UserRound, Users, UsersRound, WifiOff, Briefcase,
+  ListChecks, LogIn, LogOut, MessageSquare, Search, Settings, ShieldCheck, UserRound, Users, UsersRound, WifiOff, Briefcase,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -10,7 +10,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { usePilot } from '@/lib/store';
-import { liveMode, useSession } from '@/lib/supabase';
+import { liveMode } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
 
 export type Workspace = 'worker' | 'employer' | 'admin';
@@ -53,7 +54,7 @@ export function workspaceFor(path: string): Workspace {
 }
 
 function isActive(href: string, loc: string) {
-  if (href === '/' ) return loc === '/' || loc.startsWith('/jobs');
+  if (href === '/') return loc === '/' || loc.startsWith('/jobs');
   if (href === '/employer' || href === '/admin') return loc === href;
   return loc.startsWith(href);
 }
@@ -76,13 +77,13 @@ export function PilotChip() {
   if (liveMode) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400" data-testid="status-live" title="Connected to Supabase live database.">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Live Network
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Live Verified
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-plate/70 bg-plate/20 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-accent-foreground" data-testid="status-pilot" title="All data is sample data stored only in this browser.">
-      <span className="h-1.5 w-1.5 rounded-full bg-chart-4" />Pilot preview · sample data
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-plate/70 bg-plate/20 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-accent-foreground" data-testid="status-pilot">
+      <span className="h-1.5 w-1.5 rounded-full bg-chart-4" />Local Workspace
     </span>
   );
 }
@@ -90,11 +91,21 @@ export function PilotChip() {
 export function Shell({ children }: { children: ReactNode }) {
   const [loc, navigate] = useLocation();
   const ws = workspaceFor(loc);
-  const { state, online, loadError, actions } = usePilot();
-  const { session } = useSession();
+  const { state, online } = usePilot();
+  const { session, user, roleStatus, logout } = useAuth();
   const unread = state.notifications.filter((n) => !n.read).length;
   const nav = NAV[ws];
   const dark = ws !== 'worker';
+
+  // Determine authorized workspaces for current user
+  const accessibleWorkspaces: Workspace[] = [];
+  if (roleStatus.isAdmin) {
+    accessibleWorkspaces.push('admin', 'employer', 'worker');
+  } else if (roleStatus.isEmployer || roleStatus.employerOrg) {
+    accessibleWorkspaces.push('employer', 'worker');
+  } else {
+    accessibleWorkspaces.push('worker');
+  }
 
   return (
     <div className="min-h-[100dvh] bg-background">
@@ -102,71 +113,84 @@ export function Shell({ children }: { children: ReactNode }) {
         <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-3 px-4">
           <Wordmark />
           <div className="hidden sm:block"><PilotChip /></div>
-          <div className="ml-auto flex items-center gap-1.5">
+
+          <div className="ml-auto flex items-center gap-2">
             {!online && (
               <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive" data-testid="status-offline">
                 <WifiOff className="h-3.5 w-3.5" />Offline
               </span>
             )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5" data-testid="button-workspace-switcher">
-                  <ShieldCheck className="h-4 w-4 text-primary" />{LABEL[ws]}<ChevronDown className="h-3.5 w-3.5 opacity-60" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-72">
-                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                  {session ? (
-                    <span>
-                      <strong className="text-foreground">Signed in:</strong> {session.user?.email}<br />
-                      <strong className="text-foreground">Account Role:</strong> {String(session.user?.user_metadata?.role ?? 'Worker')}<br />
-                      <span className="text-[10px] text-muted-foreground mt-1 block">
-                        Server-side RLS controls live access. View switcher only toggles navigation.
-                      </span>
+
+            {session && accessibleWorkspaces.length > 1 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-1.5 text-xs font-semibold" data-testid="button-workspace-switcher">
+                    <ShieldCheck className="h-4 w-4 text-primary" />{LABEL[ws]}<ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-72">
+                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                    <strong className="text-foreground">{user?.email}</strong><br />
+                    <span className="text-[11px] text-muted-foreground">
+                      Role: {roleStatus.isAdmin ? 'Administrator' : roleStatus.isEmployer ? 'Employer' : 'Worker'}
                     </span>
-                  ) : (
-                    <span>Pre-Production view switcher. Sign in to access your verified account.</span>
-                  )}
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {(['worker', 'employer', 'admin'] as Workspace[]).map((w) => (
-                  <DropdownMenuItem key={w} onSelect={() => navigate(w === 'worker' ? '/' : `/${w}`)} data-testid={`menu-workspace-${w}`}>
-                    <span className={cn('mr-2 h-2 w-2 rounded-full', w === ws ? 'bg-plate' : 'bg-muted')} />
-                    {LABEL[w]} workspace {session && session.user?.user_metadata?.role !== w ? '(view only)' : ''}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {ws === 'worker' && (
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {accessibleWorkspaces.map((w) => (
+                    <DropdownMenuItem
+                      key={w}
+                      onSelect={() => navigate(w === 'worker' ? '/' : `/${w}`)}
+                      data-testid={`menu-workspace-${w}`}
+                      className="cursor-pointer"
+                    >
+                      <span className={cn('mr-2 h-2 w-2 rounded-full', w === ws ? 'bg-primary' : 'bg-muted')} />
+                      {LABEL[w]} workspace
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : session ? (
+              <span className="hidden items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1 text-xs font-medium text-muted-foreground sm:inline-flex">
+                <ShieldCheck className="h-3.5 w-3.5 text-primary" />{LABEL[ws]}
+              </span>
+            ) : null}
+
+            {session && ws === 'worker' && (
               <Link href="/notifications" aria-label={`Notifications, ${unread} unread`} className="relative rounded-full p-2 hover:bg-muted" data-testid="link-notifications">
                 <Bell className="h-5 w-5" />
                 {unread > 0 && <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-chart-4 px-1 text-[10px] font-bold text-white">{unread}</span>}
               </Link>
             )}
+
             {!session ? (
-              <Link href="/login" className="hidden items-center gap-1 rounded-md px-2 py-1.5 text-sm font-medium hover:bg-muted md:inline-flex" data-testid="link-login">
-                <LogIn className="h-4 w-4" />Sign in
-              </Link>
+              <div className="flex items-center gap-2">
+                <Link href="/login" className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-semibold hover:bg-muted" data-testid="link-login">
+                  <LogIn className="h-3.5 w-3.5" />Sign in
+                </Link>
+                <Link href="/signup" className="hidden sm:inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90" data-testid="link-signup">
+                  Register
+                </Link>
+              </div>
             ) : (
-              <Link href="/login" className="hidden items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium hover:bg-muted md:inline-flex" data-testid="link-account">
-                <UserRound className="h-3.5 w-3.5" />Account
-              </Link>
+              <div className="flex items-center gap-1.5">
+                <Link href={ws === 'employer' ? '/employer/team' : '/settings'} className="hidden items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-muted md:inline-flex" data-testid="link-account">
+                  <UserRound className="h-3.5 w-3.5" />Account
+                </Link>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={logout}
+                  className="gap-1.5 text-xs text-muted-foreground hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                  data-testid="button-header-logout"
+                  title="Sign out of FleetWala"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Log out</span>
+                </Button>
+              </div>
             )}
           </div>
         </div>
-        <div className="border-t border-dashed px-4 py-1 text-center sm:hidden"><PilotChip /></div>
-        {session && (
-          <div className="border-t bg-plate/15 px-4 py-1.5 text-center text-xs" data-testid="status-signed-in-pilot">
-            Signed in as <span className="font-semibold">{session.user?.email}</span> ({String(session.user?.user_metadata?.role ?? 'Worker')}). Staging integration active.
-          </div>
-        )}
-        {loadError && (
-          <div role="alert" className="flex items-center justify-center gap-3 border-t bg-destructive/10 px-4 py-2 text-xs">
-            Saved pilot data could not be read. Fresh sample data is loaded.
-            <button className="font-semibold underline" onClick={actions.reset} data-testid="button-reset-corrupt">Reset storage</button>
-            <button className="underline" onClick={actions.dismissError}>Dismiss</button>
-          </div>
-        )}
       </header>
 
       <div className="mx-auto flex max-w-[1400px]">
@@ -188,12 +212,25 @@ export function Shell({ children }: { children: ReactNode }) {
               );
             })}
           </nav>
+
           <div className="mt-auto px-5 pb-5">
+            {session && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={logout}
+                className={cn('mb-3 w-full justify-start gap-2 text-xs', dark ? 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-destructive' : 'text-muted-foreground hover:bg-destructive/10 hover:text-destructive')}
+                data-testid="button-sidebar-logout"
+              >
+                <LogOut className="h-3.5 w-3.5" />Sign out
+              </Button>
+            )}
             <div className={cn('mb-3 overflow-hidden', dark ? 'opacity-60' : 'opacity-80')}><div className="road-dash" /></div>
             <div className={cn('flex flex-wrap gap-x-3 gap-y-1 text-[11px]', dark ? 'text-sidebar-foreground/55' : 'text-muted-foreground')}>
-              <Link href="/legal/terms" className="hover:underline">Terms (draft)</Link>
-              <Link href="/legal/privacy" className="hover:underline">Privacy (draft)</Link>
-              <Link href="/welcome" className="hover:underline">About</Link>
+              <Link href="/terms" className="hover:underline">Terms</Link>
+              <Link href="/privacy" className="hover:underline">Privacy</Link>
+              <Link href="/support" className="hover:underline">Support</Link>
+              <Link href="/help" className="hover:underline">Help</Link>
             </div>
           </div>
         </aside>

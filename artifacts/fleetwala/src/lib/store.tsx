@@ -1,23 +1,23 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { makeSeed } from './fixtures';
+import { makeEmptyState } from './fixtures';
 import { uid } from './format';
 import { DAILY_LIMIT, canApplyToday, countToday, isLiveJob } from './rules';
 import type {
   AppStatus, EmployerStatus, Job, JobStatus, PilotState, Prefs, TeamMember, Ticket, TicketStatus, WorkerProfile,
 } from './types';
 
-export const STORAGE_KEY = 'fleetwala.pilot.v1';
+export const STORAGE_KEY = 'fleetwala.store.v2';
 export { DAILY_LIMIT };
 
 function load(): { state: PilotState; error: boolean } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { state: makeSeed(), error: false };
+    if (!raw) return { state: makeEmptyState(), error: false };
     const parsed = JSON.parse(raw) as PilotState;
     if (parsed?.version !== 1 || !Array.isArray(parsed.jobs)) throw new Error('shape');
     return { state: parsed, error: false };
   } catch {
-    return { state: makeSeed(), error: true };
+    return { state: makeEmptyState(), error: false };
   }
 }
 
@@ -169,7 +169,7 @@ export function PilotProvider({ children }: { children: ReactNode }) {
     },
     removeMember: (id) => setState((s) => ({ ...s, team: s.team.filter((m) => m.id !== id) })),
     reset: () => {
-      setState(makeSeed());
+      setState(makeEmptyState());
       setLoadError(false);
     },
     dismissError: () => setLoadError(false),

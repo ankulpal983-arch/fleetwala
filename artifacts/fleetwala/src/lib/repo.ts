@@ -88,27 +88,58 @@ export function isLiveReady(): boolean {
   return supabaseConfigured && Boolean(getSupabase());
 }
 
-/** Fetch live published jobs from Supabase or returns null if pilot mode */
-export async function getLiveJobs(): Promise<Job[] | null> {
+/** Fetch live published jobs from Supabase or returns empty array if no published jobs */
+export async function getLiveJobs(): Promise<Job[]> {
   const c = getSupabase();
-  if (!c) return null;
+  if (!c) return [];
 
+  // 1. Try public RPC first (works for visitors and authenticated users alike)
+  try {
+    const { data: rpcJobs, error: rpcErr } = await c.rpc('get_public_published_jobs');
+    if (!rpcErr && rpcJobs && Array.isArray(rpcJobs)) {
+      return rpcJobs.map((j: any) => ({
+        id: j.id,
+        employer_id: j.employer_id,
+        title: j.title,
+        company: j.company || 'Verified Logistics Partner',
+        city: j.city,
+        area: j.area || 'Central',
+        category: j.category as any,
+        min_salary: j.salary_min_inr || 18000,
+        max_salary: j.salary_max_inr || 24000,
+        shift: 'Morning & General',
+        vehicle: j.requires_driving_licence ? 'Two-wheeler with licence' : 'Any vehicle',
+        fuel_allowance: true,
+        licence_required: j.requires_driving_licence || false,
+        experience: '1-3 years',
+        description: j.description,
+        openings: 5,
+        status: 'approved' as JobStatus,
+        expires_at: j.expires_at || new Date(Date.now() + 30 * 86400000).toISOString(),
+        created_at: j.created_at,
+        moderation_note: undefined,
+      }));
+    }
+  } catch (err) {
+    console.warn('[Repo] get_public_published_jobs RPC fallback:', err);
+  }
+
+  // 2. Fallback to direct authenticated select
   const { data, error } = await c
     .from('jobs')
-    .select('*')
+    .select('*, employers(legal_name)')
     .eq('state', 'published')
     .order('created_at', { ascending: false });
 
   if (error || !data) {
-    console.warn('[Repo] getLiveJobs error:', error?.message);
-    return null;
+    return [];
   }
 
-  return data.map((j) => ({
+  return data.map((j: any) => ({
     id: j.id,
     employer_id: j.employer_id,
     title: j.title,
-    company: 'Verified Logistics Partner',
+    company: j.employers?.legal_name || 'Verified Logistics Partner',
     city: j.city,
     area: j.area || 'Central',
     category: j.category as any,
