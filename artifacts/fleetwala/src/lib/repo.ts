@@ -1007,3 +1007,101 @@ export async function grantLiveStagingJobWaiver(jobId: string, reason: string): 
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
+
+export interface LiveCandidateInvitation {
+  id: string;
+  job_id: string | null;
+  job_title: string;
+  employer_name: string;
+  message: string | null;
+  status: 'pending' | 'accepted' | 'declined' | 'expired';
+  created_at: string;
+  expires_at: string;
+}
+
+export interface LiveEmployerInvitation {
+  id: string;
+  candidate_handle: string;
+  job_id: string | null;
+  job_title: string;
+  message: string | null;
+  status: 'pending' | 'accepted' | 'declined' | 'expired';
+  created_at: string;
+  responded_at: string | null;
+}
+
+/** Create a real candidate invitation from verified employer */
+export async function createLiveCandidateInvitation(
+  candidateHandle: string,
+  jobId: string | null,
+  message?: string
+): Promise<RepositoryResult<{ invitationId: string }>> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { data, error } = await c.rpc('create_candidate_invitation', {
+    p_candidate_handle: candidateHandle,
+    p_job_id: jobId,
+    p_message: message || null,
+  });
+
+  if (error) {
+    console.error('[Repo] createLiveCandidateInvitation error:', error);
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true, data: { invitationId: data } };
+}
+
+/** Worker responds to a candidate invitation (accept/decline) */
+export async function respondToLiveCandidateInvitation(
+  invitationId: string,
+  accept: boolean
+): Promise<RepositoryResult> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { error } = await c.rpc('respond_to_candidate_invitation', {
+    p_invitation_id: invitationId,
+    p_accept: accept,
+  });
+
+  if (error) {
+    console.error('[Repo] respondToLiveCandidateInvitation error:', error);
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true };
+}
+
+/** Get candidate invitations received by the current worker */
+export async function getLiveWorkerInvitations(): Promise<LiveCandidateInvitation[]> {
+  const c = getSupabase();
+  if (!c) return [];
+
+  const { data, error } = await c.rpc('get_worker_candidate_invitations');
+  if (error || !data) {
+    console.warn('[Repo] getLiveWorkerInvitations error:', error?.message);
+    return [];
+  }
+
+  return data;
+}
+
+/** Get candidate invitations sent by the current employer */
+export async function getLiveEmployerInvitations(jobId?: string): Promise<LiveEmployerInvitation[]> {
+  const c = getSupabase();
+  if (!c) return [];
+
+  const { data, error } = await c.rpc('get_employer_candidate_invitations', {
+    p_job_id: jobId || null,
+  });
+
+  if (error || !data) {
+    console.warn('[Repo] getLiveEmployerInvitations error:', error?.message);
+    return [];
+  }
+
+  return data;
+}
+

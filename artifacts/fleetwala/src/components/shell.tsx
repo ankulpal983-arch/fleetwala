@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
 import {
   Bell, Bookmark, Building2, ChevronDown, ClipboardList, CreditCard, FileClock, Gavel, LayoutDashboard, LifeBuoy,
-  ListChecks, LogIn, LogOut, MessageSquare, Search, Settings, ShieldCheck, UserRound, Users, UsersRound, WifiOff, Briefcase,
+  ListChecks, LogIn, LogOut, MessageSquare, Search, Settings, ShieldCheck, UserRound, Users, UsersRound, WifiOff, Briefcase, CheckSquare, HelpCircle, FileText
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -10,7 +10,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { usePilot } from '@/lib/store';
-import { liveMode } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
 
@@ -26,18 +25,18 @@ const NAV: Record<Workspace, NavItem[]> = {
     { href: '/profile', label: 'Profile', icon: UserRound },
     { href: '/notifications', label: 'Notifications', icon: Bell },
     { href: '/settings', label: 'Settings', icon: Settings },
-    { href: '/support', label: 'Help & safety', icon: LifeBuoy },
+    { href: '/help', label: 'Help & FAQ', icon: LifeBuoy },
   ],
   employer: [
     { href: '/employer', label: 'Overview', icon: LayoutDashboard },
-    { href: '/employer/jobs', label: 'Jobs', icon: Briefcase },
+    { href: '/employer/jobs', label: 'Manage jobs', icon: Briefcase },
     { href: '/employer/applicants', label: 'Applicants', icon: ListChecks },
-    { href: '/employer/candidates', label: 'Candidates', icon: UsersRound },
+    { href: '/employer/candidates', label: 'Find Candidates', icon: UsersRound },
     { href: '/employer/billing', label: 'Billing', icon: CreditCard },
-    { href: '/employer/team', label: 'Team', icon: Users },
+    { href: '/employer/team', label: 'Company Team', icon: Users },
   ],
   admin: [
-    { href: '/admin', label: 'Overview', icon: LayoutDashboard },
+    { href: '/admin', label: 'Trust overview', icon: LayoutDashboard },
     { href: '/admin/jobs', label: 'Job moderation', icon: Gavel },
     { href: '/admin/employers', label: 'Employers', icon: Building2 },
     { href: '/admin/audit', label: 'Audit log', icon: FileClock },
@@ -74,45 +73,35 @@ export function Wordmark({ dark }: { dark?: boolean }) {
 }
 
 export function PilotChip() {
-  if (liveMode) {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400" data-testid="status-live" title="Connected to Supabase live database.">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Live Verified
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-plate/70 bg-plate/20 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-accent-foreground" data-testid="status-pilot">
-      <span className="h-1.5 w-1.5 rounded-full bg-chart-4" />Local Workspace
-    </span>
-  );
+  return null;
 }
 
 export function Shell({ children }: { children: ReactNode }) {
   const [loc, navigate] = useLocation();
-  const ws = workspaceFor(loc);
   const { state, online } = usePilot();
   const { session, user, roleStatus, logout } = useAuth();
   const unread = state.notifications.filter((n) => !n.read).length;
+
+  // Determine user's primary workspace based on verified role
+  const userPrimaryWorkspace: Workspace = roleStatus.isAdmin
+    ? 'admin'
+    : roleStatus.isEmployer || roleStatus.employerOrg
+    ? 'employer'
+    : 'worker';
+
+  // Current view's workspace
+  const currentViewWorkspace = workspaceFor(loc);
+
+  // If user is logged in, their sidebar must reflect their authorized role
+  const ws = session ? userPrimaryWorkspace : currentViewWorkspace;
   const nav = NAV[ws];
   const dark = ws !== 'worker';
-
-  // Determine authorized workspaces for current user
-  const accessibleWorkspaces: Workspace[] = [];
-  if (roleStatus.isAdmin) {
-    accessibleWorkspaces.push('admin', 'employer', 'worker');
-  } else if (roleStatus.isEmployer || roleStatus.employerOrg) {
-    accessibleWorkspaces.push('employer', 'worker');
-  } else {
-    accessibleWorkspaces.push('worker');
-  }
 
   return (
     <div className="min-h-[100dvh] bg-background">
       <header className="sticky top-0 z-40 border-b bg-background/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-3 px-4">
           <Wordmark />
-          <div className="hidden sm:block"><PilotChip /></div>
 
           <div className="ml-auto flex items-center gap-2">
             {!online && (
@@ -121,38 +110,97 @@ export function Shell({ children }: { children: ReactNode }) {
               </span>
             )}
 
-            {session && accessibleWorkspaces.length > 1 ? (
+            {session ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-1.5 text-xs font-semibold" data-testid="button-workspace-switcher">
-                    <ShieldCheck className="h-4 w-4 text-primary" />{LABEL[ws]}<ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                  <Button variant="outline" size="sm" className="gap-1.5 text-xs font-semibold" data-testid="button-account-menu">
+                    <UserRound className="h-4 w-4 text-primary" />
+                    <span className="hidden sm:inline font-medium">{user?.email}</span>
+                    <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {roleStatus.isAdmin ? 'Admin' : roleStatus.isEmployer ? 'Employer' : 'Worker'}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 opacity-60" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-72">
+                <DropdownMenuContent align="end" className="w-64" data-testid="menu-account-dropdown">
                   <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
                     <strong className="text-foreground">{user?.email}</strong><br />
                     <span className="text-[11px] text-muted-foreground">
-                      Role: {roleStatus.isAdmin ? 'Administrator' : roleStatus.isEmployer ? 'Employer' : 'Worker'}
+                      Role: {roleStatus.isAdmin ? 'Platform Administrator' : roleStatus.isEmployer ? 'Hiring Employer' : 'Logistics Worker'}
                     </span>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {accessibleWorkspaces.map((w) => (
-                    <DropdownMenuItem
-                      key={w}
-                      onSelect={() => navigate(w === 'worker' ? '/' : `/${w}`)}
-                      data-testid={`menu-workspace-${w}`}
-                      className="cursor-pointer"
-                    >
-                      <span className={cn('mr-2 h-2 w-2 rounded-full', w === ws ? 'bg-primary' : 'bg-muted')} />
-                      {LABEL[w]} workspace
-                    </DropdownMenuItem>
-                  ))}
+
+                  {/* Role-Specific Account Navigation */}
+                  {roleStatus.isAdmin ? (
+                    <>
+                      <DropdownMenuItem onSelect={() => navigate('/admin')} className="cursor-pointer" data-testid="menu-item-admin-console">
+                        <LayoutDashboard className="mr-2 h-4 w-4 text-primary" />Admin Console
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/admin/jobs')} className="cursor-pointer" data-testid="menu-item-admin-jobs">
+                        <Gavel className="mr-2 h-4 w-4 text-muted-foreground" />Job Moderation
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/admin/employers')} className="cursor-pointer" data-testid="menu-item-admin-employers">
+                        <Building2 className="mr-2 h-4 w-4 text-muted-foreground" />Employer Verification
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/admin/audit')} className="cursor-pointer" data-testid="menu-item-admin-audit">
+                        <FileClock className="mr-2 h-4 w-4 text-muted-foreground" />Audit Log
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/admin/support')} className="cursor-pointer" data-testid="menu-item-admin-support">
+                        <LifeBuoy className="mr-2 h-4 w-4 text-muted-foreground" />Support Queue
+                      </DropdownMenuItem>
+                    </>
+                  ) : roleStatus.isEmployer || roleStatus.employerOrg ? (
+                    <>
+                      <DropdownMenuItem onSelect={() => navigate('/employer')} className="cursor-pointer" data-testid="menu-item-employer-dashboard">
+                        <LayoutDashboard className="mr-2 h-4 w-4 text-primary" />My Dashboard
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/employer/jobs')} className="cursor-pointer" data-testid="menu-item-employer-jobs">
+                        <Briefcase className="mr-2 h-4 w-4 text-muted-foreground" />Manage Jobs
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/employer/candidates')} className="cursor-pointer" data-testid="menu-item-employer-candidates">
+                        <UsersRound className="mr-2 h-4 w-4 text-muted-foreground" />Find Candidates
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/employer/team')} className="cursor-pointer" data-testid="menu-item-employer-team">
+                        <Building2 className="mr-2 h-4 w-4 text-muted-foreground" />Company Profile & Team
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/support')} className="cursor-pointer" data-testid="menu-item-support">
+                        <LifeBuoy className="mr-2 h-4 w-4 text-muted-foreground" />Help & Support
+                      </DropdownMenuItem>
+                    </>
+                  ) : (
+                    <>
+                      <DropdownMenuItem onSelect={() => navigate('/')} className="cursor-pointer" data-testid="menu-item-worker-dashboard">
+                        <Search className="mr-2 h-4 w-4 text-primary" />My Dashboard (Find Jobs)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/profile')} className="cursor-pointer" data-testid="menu-item-worker-profile">
+                        <UserRound className="mr-2 h-4 w-4 text-muted-foreground" />My Profile
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/applications')} className="cursor-pointer" data-testid="menu-item-worker-apps">
+                        <ClipboardList className="mr-2 h-4 w-4 text-muted-foreground" />My Applications
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/settings')} className="cursor-pointer" data-testid="menu-item-worker-settings">
+                        <Settings className="mr-2 h-4 w-4 text-muted-foreground" />Account Settings
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/notifications')} className="cursor-pointer" data-testid="menu-item-worker-notices">
+                        <Bell className="mr-2 h-4 w-4 text-muted-foreground" />Notifications
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => navigate('/help')} className="cursor-pointer" data-testid="menu-item-worker-help">
+                        <LifeBuoy className="mr-2 h-4 w-4 text-muted-foreground" />Help & FAQ
+                      </DropdownMenuItem>
+                    </>
+                  )}
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={logout}
+                    className="cursor-pointer text-destructive focus:bg-destructive/10 focus:text-destructive"
+                    data-testid="menu-item-logout"
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />Log Out
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            ) : session ? (
-              <span className="hidden items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2.5 py-1 text-xs font-medium text-muted-foreground sm:inline-flex">
-                <ShieldCheck className="h-3.5 w-3.5 text-primary" />{LABEL[ws]}
-              </span>
             ) : null}
 
             {session && ws === 'worker' && (
@@ -172,22 +220,17 @@ export function Shell({ children }: { children: ReactNode }) {
                 </Link>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5">
-                <Link href={ws === 'employer' ? '/employer/team' : '/settings'} className="hidden items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-muted md:inline-flex" data-testid="link-account">
-                  <UserRound className="h-3.5 w-3.5" />Account
-                </Link>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={logout}
-                  className="gap-1.5 text-xs text-muted-foreground hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
-                  data-testid="button-header-logout"
-                  title="Sign out of FleetWala"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Log out</span>
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={logout}
+                className="gap-1.5 text-xs text-muted-foreground hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                data-testid="button-header-logout"
+                title="Sign out of FleetWala"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Log out</span>
+              </Button>
             )}
           </div>
         </div>
@@ -196,7 +239,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <div className="mx-auto flex max-w-[1400px]">
         <aside className={cn('sticky top-14 hidden h-[calc(100dvh-3.5rem)] w-60 shrink-0 flex-col md:flex', dark ? 'tarmac-grid bg-sidebar text-sidebar-foreground' : 'border-r')}>
           <p className={cn('px-5 pb-2 pt-6 font-mono text-[10px] uppercase tracking-[0.2em]', dark ? 'text-sidebar-foreground/50' : 'text-muted-foreground')}>
-            {LABEL[ws]} workspace
+            {LABEL[ws]} Portal
           </p>
           <nav className="flex flex-col gap-0.5 px-3" aria-label={`${LABEL[ws]} navigation`}>
             {nav.map((n) => {

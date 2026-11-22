@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
@@ -26,7 +27,7 @@ import { liveMode, useSession } from '@/lib/supabase';
 import {
   discoverLiveCandidates, getLiveEmployerOrg, createLiveJobDraft,
   updateLiveJobDraft, submitLiveJobDraft, getLiveEmployerJobs, getLiveEmployerApplicants,
-  setLiveApplicationStatus, type LiveApplicant
+  setLiveApplicationStatus, type LiveApplicant, createLiveCandidateInvitation
 } from '@/lib/repo';
 
 const COMPANY = 'Ghar-Tak Parcels';
@@ -182,7 +183,7 @@ const jobSchema = z.object({
   expires_at: z.string().min(1, 'Pick a closing date'),
   fuel_allowance: z.boolean(),
   licence_required: z.boolean(),
-  description: z.string().trim().min(30, 'Describe the work in at least 30 characters').max(1200)
+  description: z.string().trim().min(10, 'Describe the work in at least 10 characters').max(1200)
     .refine((v) => !/(deposit|registration fee|pay to join)/i.test(v), 'Listings cannot ask workers for money'),
 }).refine((v) => Number(v.max_salary) >= Number(v.min_salary), { path: ['max_salary'], message: 'Must be at least the minimum' });
 type JobForm = z.infer<typeof jobSchema>;
@@ -312,37 +313,99 @@ function JobDialog({ open, onOpenChange, job, orgId, onSuccess }: { open: boolea
       <FormItem><FormLabel>{label}</FormLabel><FormControl><Input type={type} inputMode={type === 'text' && name !== 'title' ? 'numeric' : undefined} {...field} data-testid={`input-job-${name}`} /></FormControl><FormMessage /></FormItem>)} />
   );
 
+  const onFormError = (errors: any) => {
+    const messages = Object.values(errors).map((e: any) => e?.message).filter(Boolean);
+    const primary = messages[0] || 'Please complete all required fields correctly.';
+    toast({
+      title: 'Validation required',
+      description: String(primary),
+      variant: 'destructive',
+    });
+  };
+
+  const descValue = form.watch('description') || '';
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto">
-        <DialogHeader><DialogTitle>{job ? 'Edit job' : 'New job'}</DialogTitle><DialogDescription>Saved as pilot sample data. Submitting sends it to the admin moderation queue.</DialogDescription></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>{job ? 'Edit job listing' : 'New job listing'}</DialogTitle>
+          <DialogDescription>
+            Drafts are saved immediately. Submitting sends the listing to the administrative review queue.
+          </DialogDescription>
+        </DialogHeader>
+
+        {Object.keys(form.formState.errors).length > 0 && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>Please resolve the form validation errors highlighted below before saving.</span>
+          </div>
+        )}
+
         <Form {...form}>
-          <form className="grid gap-4 sm:grid-cols-2" onSubmit={(e) => e.preventDefault()}>
-            <div className="sm:col-span-2">{txt('title', 'Job title')}</div>
-            {sel('category', 'Category', CATEGORIES)}
-            {sel('city', 'City', CITY_NAMES)}
-            {sel('area', 'Area', CITIES[city] ?? [])}
-            {sel('shift', 'Shift', SHIFTS)}
-            {txt('min_salary', 'Min monthly pay (Rs)')}
-            {txt('max_salary', 'Max monthly pay (Rs)')}
-            {sel('vehicle', 'Vehicle', VEHICLES)}
-            {sel('experience', 'Experience', EXPERIENCE)}
-            {txt('openings', 'Openings')}
-            {txt('expires_at', 'Closes on', 'date')}
-            {(['fuel_allowance', 'licence_required'] as const).map((n) => (
-              <FormField key={n} control={form.control} name={n} render={({ field }) => (
-                <FormItem className="flex items-center justify-between rounded-lg border p-3"><FormLabel>{n === 'fuel_allowance' ? 'Fuel allowance' : 'Driving licence required'}</FormLabel>
-                  <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} data-testid={`switch-job-${n}`} /></FormControl></FormItem>)} />
-            ))}
-            <FormField control={form.control} name="description" render={({ field }) => (
-              <FormItem className="sm:col-span-2"><FormLabel>Description</FormLabel><FormControl><Textarea rows={4} {...field} data-testid="input-job-description" /></FormControl><FormMessage /></FormItem>)} />
+          <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
+            {/* Section 1: Basic Information */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">1. Role & Location</h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">{txt('title', 'Job title')}</div>
+                {sel('category', 'Category', CATEGORIES)}
+                {sel('city', 'City', CITY_NAMES)}
+                <div className="sm:col-span-2">{sel('area', 'Area in ' + city, CITIES[city] ?? [])}</div>
+              </div>
+            </div>
+
+            {/* Section 2: Shift & Requirements */}
+            <div className="space-y-3 border-t pt-4">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">2. Requirements & Shifts</h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {sel('shift', 'Shift', SHIFTS)}
+                {txt('openings', 'Openings')}
+                {sel('vehicle', 'Required vehicle', VEHICLES)}
+                {sel('experience', 'Experience', EXPERIENCE)}
+                {(['fuel_allowance', 'licence_required'] as const).map((n) => (
+                  <FormField key={n} control={form.control} name={n} render={({ field }) => (
+                    <FormItem className="flex items-center justify-between rounded-lg border p-3">
+                      <FormLabel>{n === 'fuel_allowance' ? 'Fuel allowance' : 'Driving licence required'}</FormLabel>
+                      <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} data-testid={`switch-job-${n}`} /></FormControl>
+                    </FormItem>)} />
+                ))}
+              </div>
+            </div>
+
+            {/* Section 3: Compensation & Closing Date */}
+            <div className="space-y-3 border-t pt-4">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">3. Compensation & Timeline</h4>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {txt('min_salary', 'Min pay (₹/mo)')}
+                {txt('max_salary', 'Max pay (₹/mo)')}
+                {txt('expires_at', 'Listing closes', 'date')}
+              </div>
+            </div>
+
+            {/* Section 4: Description */}
+            <div className="space-y-3 border-t pt-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">4. Role Description</h4>
+                <span className={cn('text-xs font-mono', descValue.length < 10 ? 'text-destructive' : 'text-muted-foreground')}>
+                  {descValue.length} / 10 min chars
+                </span>
+              </div>
+              <FormField control={form.control} name="description" render={({ field }) => (
+                <FormItem>
+                  <FormControl>
+                    <Textarea rows={4} placeholder="Describe daily routes, delivery volume, shift expectations, and payout terms..." {...field} data-testid="input-job-description" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>)} />
+            </div>
           </form>
         </Form>
-        <DialogFooter className="gap-2">
+        <DialogFooter className="gap-2 pt-2 border-t">
           <Button
             variant="outline"
             disabled={isSavingDraft || isSubmitting}
-            onClick={form.handleSubmit((v) => save(v, false))}
+            onClick={form.handleSubmit((v) => save(v, false), onFormError)}
             data-testid="button-save-draft"
           >
             {isSavingDraft ? (
@@ -356,7 +419,7 @@ function JobDialog({ open, onOpenChange, job, orgId, onSuccess }: { open: boolea
           </Button>
           <Button
             disabled={isSavingDraft || isSubmitting}
-            onClick={form.handleSubmit((v) => save(v, true))}
+            onClick={form.handleSubmit((v) => save(v, true), onFormError)}
             data-testid="button-submit-job"
           >
             {isSubmitting ? (
@@ -557,12 +620,122 @@ export function EmployerApplicants() {
   );
 }
 
+function InviteCandidateDialog({
+  candidate,
+  open,
+  onOpenChange,
+  jobs,
+  onSuccess,
+}: {
+  candidate: Candidate | null;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  jobs: Job[];
+  onSuccess?: () => void;
+}) {
+  const { toast } = useToast();
+  const [selectedJobId, setSelectedJobId] = useState<string>('general');
+  const [message, setMessage] = useState('Hi, we reviewed your profile on FleetWala and would like to invite you to discuss our active logistics opening.');
+  const [sending, setSending] = useState(false);
+
+  if (!candidate) return null;
+
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      const jobId = selectedJobId === 'general' ? null : selectedJobId;
+      const res = await createLiveCandidateInvitation(candidate.id, jobId, message.trim());
+      if (!res.ok) {
+        toast({
+          title: 'Invitation failed',
+          description: res.error || 'Could not send invitation.',
+          variant: 'destructive',
+        });
+        setSending(false);
+        return;
+      }
+      toast({
+        title: 'Invitation sent',
+        description: `Candidate ${candidate.code} has been invited.`,
+      });
+      onOpenChange(false);
+      if (onSuccess) onSuccess();
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err?.message || 'Failed to send invitation.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Invite Candidate</DialogTitle>
+          <DialogDescription>
+            Send an in-app hiring invitation to candidate <strong>{candidate.code}</strong>.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="rounded-lg border bg-muted/40 p-3 text-xs space-y-1">
+            <div className="flex justify-between font-medium">
+              <span>Candidate: {candidate.code}</span>
+              <span className="text-primary font-semibold">{candidate.area}</span>
+            </div>
+            <p className="text-muted-foreground">{candidate.experience} · {candidate.vehicle}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Select Job Opening</Label>
+            <Select value={selectedJobId} onValueChange={setSelectedJobId}>
+              <SelectTrigger data-testid="select-invite-job">
+                <SelectValue placeholder="Choose job opening" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="general">General Logistics Opportunity</SelectItem>
+                {jobs.map((j) => (
+                  <SelectItem key={j.id} value={j.id}>{j.title} ({j.area})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Invitation Message</Label>
+            <Textarea
+              rows={3}
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Add details about the shift, depot location, and compensation..."
+              data-testid="input-invite-message"
+            />
+          </div>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" disabled={sending} onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button disabled={sending} onClick={handleSend} data-testid="button-confirm-invite">
+            {sending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}
+            Send Invitation
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function EmployerCandidates() {
-  const { state } = usePilot();
+  const { state, jobs } = useEmployer();
   const { session } = useSession();
   const { toast } = useToast();
   const [area, setArea] = useState('all');
   const [liveCandidates, setLiveCandidates] = useState<Candidate[] | null>(null);
+  const [inviting, setInviting] = useState<Candidate | null>(null);
 
   useEffect(() => {
     if (liveMode && session) {
@@ -576,7 +749,7 @@ export function EmployerCandidates() {
   const list = useMemo(() => candidatesSource.filter((c) => area === 'all' || c.area === area), [candidatesSource, area]);
   return (
     <div>
-      <PageHeader eyebrow={COMPANY} title="Candidate preview" description="Anonymised cards of workers who opted in to discovery. Names, phones and photos are never shown."
+      <PageHeader eyebrow={COMPANY} title="Find Candidates" description="Anonymised cards of workers who opted in to discovery. Contact details are masked until authorized."
         actions={<Select value={area} onValueChange={setArea}><SelectTrigger className="w-48" data-testid="select-candidate-area"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All Bengaluru areas</SelectItem>{CITIES.Bengaluru.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent></Select>} />
       {list.length === 0 ? <EmptyState icon={UsersRound} title="No candidates in this area" body="Try another area." /> : (
@@ -590,14 +763,20 @@ export function EmployerCandidates() {
               <p className="mt-2 text-[11px] text-muted-foreground">{c.languages.join(', ')}</p>
               <div className="mt-3 flex items-center justify-between border-t border-dashed pt-3">
                 <span className={cn('text-xs font-medium', c.available ? 'text-signal' : 'text-muted-foreground')}>{c.available ? 'Available now' : 'Not available'}</span>
-                <Button size="sm" variant="outline" onClick={() => toast({ title: 'Invites open after live launch', description: 'Inviting candidates needs verified accounts and consent. Disabled in the pilot.' })} data-testid={`button-invite-${c.id}`}>
-                  <Lock className="mr-1 h-3.5 w-3.5" />Invite
+                <Button size="sm" variant="outline" onClick={() => setInviting(c)} data-testid={`button-invite-${c.id}`}>
+                  <Send className="mr-1 h-3.5 w-3.5" />Invite
                 </Button>
               </div>
             </article>
           ))}
         </div>
       )}
+      <InviteCandidateDialog
+        candidate={inviting}
+        open={Boolean(inviting)}
+        onOpenChange={(o) => { if (!o) setInviting(null); }}
+        jobs={jobs}
+      />
     </div>
   );
 }

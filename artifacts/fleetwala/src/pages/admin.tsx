@@ -268,7 +268,7 @@ export function AdminEmployers() {
       return;
     }
     actions.setEmployerStatus(e.id, 'verified');
-    toast({ title: 'Marked verified (pilot)' });
+    toast({ title: 'Employer Verified', description: `${e.name} has been verified.` });
   };
 
   const handleSuspend = async (e: Employer) => {
@@ -332,7 +332,7 @@ export function AdminAudit() {
   const list = state.audit.filter((a) => `${a.actor} ${a.action} ${a.target}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <div>
-      <PageHeader eyebrow="Trust & safety" title="Audit log" description="Append-only record of pilot actions in this browser."
+      <PageHeader eyebrow="Trust & safety" title="Audit log" description="Append-only record of system and administrative audit events."
         actions={<Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter" className="w-56" aria-label="Filter audit log" data-testid="input-audit-filter" />} />
       {list.length === 0 ? <EmptyState icon={FileClock} title="No matching events" body="Try a different filter." /> : (
         <div className="overflow-hidden rounded-xl border bg-tarmac font-mono text-xs text-sidebar-foreground">

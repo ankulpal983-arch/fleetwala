@@ -4,14 +4,14 @@ const fs = require('fs');
 const path = require('path');
 
 const routesToTest = [
-  { url: 'http://localhost:3000', name: '01-home', expectedText: 'Work type' },
+  { url: 'http://localhost:3000', name: '01-home', expectedText: 'FleetWala' },
   { url: 'http://localhost:3000/login', name: '02-login', expectedText: 'Sign in' },
   { url: 'http://localhost:3000/signup', name: '03-signup', expectedText: 'Create your FleetWala account' },
   { url: 'http://localhost:3000/employer', name: '04-employer', expectedText: 'Employer Workspace' },
   { url: 'http://localhost:3000/employer/jobs', name: '05-employer-jobs', expectedText: 'Employer Workspace' },
   { url: 'http://localhost:3000/admin', name: '06-admin', expectedText: 'Administrator Access Denied' },
-  { url: 'http://localhost:3000/profile', name: '07-profile', expectedText: 'Sign In Required' },
-  { url: 'http://localhost:3000/applications', name: '08-applications', expectedText: 'Sign In Required' }
+  { url: 'http://localhost:3000/profile', name: '07-profile', expectedText: 'Worker Portal Only' },
+  { url: 'http://localhost:3000/applications', name: '08-applications', expectedText: 'Worker Portal Only' }
 ];
 
 async function runTestSuite() {

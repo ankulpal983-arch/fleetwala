@@ -1,14 +1,15 @@
 import { type ReactNode, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
+import { Route, Switch, useLocation, Router as WouterRouter, Redirect } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { Shell } from '@/components/shell';
 import { PilotProvider } from '@/lib/store';
-import { AuthProvider } from '@/lib/auth-context';
+import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { gate } from '@/lib/supabase';
+
 import { ProtectedAdminRoute, ProtectedEmployerRoute, ProtectedWorkerRoute } from '@/components/route-guards';
 import { FindJobs, JobDetail, SavedJobs } from '@/pages/worker-jobs';
 import { Applications, Messages, Notifications, Profile, SettingsPage, Support } from '@/pages/worker-more';
@@ -56,11 +57,23 @@ function isPublic(loc: string) {
   );
 }
 
+function RootIndexRoute() {
+  const { session, roleStatus } = useAuth();
+  if (session && roleStatus.isAdmin) {
+    return <Redirect to="/admin" />;
+  }
+  if (session && (roleStatus.isEmployer || roleStatus.employerOrg)) {
+    return <Redirect to="/employer" />;
+  }
+  return <FindJobs />;
+}
+
 function Router() {
   const [loc] = useLocation();
   useEffect(() => {
     const titles: Record<string, string> = {
-      '/': 'Find local jobs', '/saved': 'Saved jobs', '/applications': 'My applications',
+      '/': 'Find local jobs', '/worker': 'Worker dashboard', '/saved': 'Saved jobs', '/applications': 'My applications',
+
       '/messages': 'Messages', '/notifications': 'Notifications', '/profile': 'My profile',
       '/settings': 'Privacy and settings', '/support': 'Help, grievance and safety',
       '/contact': 'Contact support', '/help': 'Help center', '/faq': 'Frequently asked questions',
@@ -118,7 +131,10 @@ function Router() {
     <Shell>
       <RoutedErrorBoundary>
         <Switch>
-          <Route path="/" component={FindJobs} />
+          <Route path="/" component={RootIndexRoute} />
+          <Route path="/worker">
+            <ProtectedWorkerRoute><FindJobs /></ProtectedWorkerRoute>
+          </Route>
           <Route path="/jobs/:id" component={JobDetail} />
 
           {/* Protected Worker Routes */}

@@ -27,7 +27,8 @@ import { useAuth } from '@/lib/auth-context';
 import {
   getLiveWorkerProfile, saveLiveWorkerProfile, getLiveApplications,
   getLiveNotifications, markLiveNotificationRead, getLiveConversations,
-  sendLiveMessage
+  sendLiveMessage, getLiveWorkerInvitations, respondToLiveCandidateInvitation,
+  type LiveCandidateInvitation
 } from '@/lib/repo';
 
 const FLOW: AppStatus[] = ['applied', 'viewed', 'shortlisted', 'hired'];
@@ -36,14 +37,35 @@ export function Applications() {
   const { state, actions } = usePilot();
   const { session } = useSession();
   const { toast } = useToast();
-  const [tab, setTab] = useState<'active' | 'closed'>('active');
+  const [tab, setTab] = useState<'active' | 'invitations' | 'closed'>('active');
   const [liveApps, setLiveApps] = useState<Application[] | null>(null);
+  const [liveInvs, setLiveInvs] = useState<LiveCandidateInvitation[]>([]);
+
+  const refreshInvs = () => {
+    if (liveMode && session) {
+      getLiveWorkerInvitations().then(setLiveInvs);
+    }
+  };
 
   useEffect(() => {
     if (liveMode && session) {
       getLiveApplications().then(setLiveApps);
+      refreshInvs();
     }
   }, [session]);
+
+  const handleRespondInvite = async (invitationId: string, accept: boolean) => {
+    const res = await respondToLiveCandidateInvitation(invitationId, accept);
+    if (!res.ok) {
+      toast({ title: 'Error', description: res.error, variant: 'destructive' });
+      return;
+    }
+    toast({
+      title: accept ? 'Invitation Accepted' : 'Invitation Declined',
+      description: accept ? 'The employer has been notified and can now message you.' : 'The invitation has been closed.',
+    });
+    refreshInvs();
+  };
 
   const appsSource: Application[] = liveMode && session ? (liveApps ?? []) : state.applications.filter((a) => a.candidate_id === 'me');
   const list = appsSource
@@ -53,10 +75,59 @@ export function Applications() {
   return (
     <div className="mx-auto max-w-4xl">
       <PageHeader eyebrow="Worker" title="Applications" description="Every step, timestamped in IST. Employers only see what you chose to share." />
-      <Tabs value={tab} onValueChange={(v) => setTab(v as 'active' | 'closed')} className="mb-5">
-        <TabsList><TabsTrigger value="active" data-testid="tab-active">In progress</TabsTrigger><TabsTrigger value="closed" data-testid="tab-closed">Closed</TabsTrigger></TabsList>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'active' | 'invitations' | 'closed')} className="mb-5">
+        <TabsList>
+          <TabsTrigger value="active" data-testid="tab-active">In progress</TabsTrigger>
+          <TabsTrigger value="invitations" data-testid="tab-invitations">
+            Hiring Invitations {liveInvs.filter((i) => i.status === 'pending').length > 0 && `(${liveInvs.filter((i) => i.status === 'pending').length})`}
+          </TabsTrigger>
+          <TabsTrigger value="closed" data-testid="tab-closed">Closed</TabsTrigger>
+        </TabsList>
       </Tabs>
-      {list.length === 0 ? (
+
+      {tab === 'invitations' ? (
+        liveInvs.length === 0 ? (
+          <EmptyState
+            icon={ClipboardList}
+            title="No invitations yet"
+            body="When verified employers search for candidates in your area, their hiring invitations will appear here."
+            action={<Link href="/" className="font-semibold text-primary underline">Find local jobs</Link>}
+          />
+        ) : (
+          <div className="space-y-4">
+            {liveInvs.map((inv) => (
+              <article key={inv.id} className="rise rounded-xl border bg-card p-5" data-testid={`card-invitation-${inv.id}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-semibold text-primary uppercase tracking-wider">{inv.employer_name}</span>
+                    <h3 className="font-display text-lg font-bold mt-0.5">{inv.job_title}</h3>
+                    <p className="mt-2 text-xs text-muted-foreground leading-relaxed bg-muted/50 p-2.5 rounded-lg border">
+                      "{inv.message || 'We would like to invite you to discuss our active delivery partner role.'}"
+                    </p>
+                  </div>
+                  <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize',
+                    inv.status === 'accepted' ? 'bg-emerald-500/10 text-emerald-600' :
+                    inv.status === 'declined' ? 'bg-destructive/10 text-destructive' :
+                    'bg-primary/10 text-primary'
+                  )}>
+                    {inv.status}
+                  </span>
+                </div>
+                {inv.status === 'pending' && (
+                  <div className="mt-4 flex justify-end gap-2 border-t pt-3">
+                    <Button size="sm" variant="outline" onClick={() => handleRespondInvite(inv.id, false)} data-testid={`button-decline-invite-${inv.id}`}>
+                      Decline
+                    </Button>
+                    <Button size="sm" onClick={() => handleRespondInvite(inv.id, true)} data-testid={`button-accept-invite-${inv.id}`}>
+                      Accept Invitation
+                    </Button>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        )
+      ) : list.length === 0 ? (
         <EmptyState icon={ClipboardList} title={tab === 'active' ? 'No active applications' : 'Nothing closed yet'} body="Apply to a job and its progress shows up here." action={<Link href="/" className="font-semibold text-primary underline">Find jobs</Link>} />
       ) : (
         <div className="space-y-4">
@@ -336,7 +407,7 @@ export function Profile() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader eyebrow="Worker" title="Your profile" description="Only your first name, area, experience and vehicle are ever shown. No phone, photo or ID is collected in the pilot." />
+      <PageHeader eyebrow="Worker" title="Your profile" description="Only your display name, area, experience and vehicle eligibility are shown. Your phone number is masked by default." />
       <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5 rounded-2xl border bg-card p-5 md:p-6">
@@ -561,7 +632,7 @@ export function Support() {
   const onSubmit = (v: TicketForm) => {
     actions.createTicket({ ...v, from: 'worker' });
     form.reset();
-    toast({ title: 'Request logged', description: 'Visible in the admin support queue (pilot).' });
+    toast({ title: 'Support ticket submitted', description: 'Our support team will review your ticket within 24 hours.' });
   };
   return (
     <div className="mx-auto max-w-5xl">

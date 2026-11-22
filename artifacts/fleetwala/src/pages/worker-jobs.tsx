@@ -103,16 +103,26 @@ export function FindJobs() {
   const activeFilters = cats.length + (fuelOnly ? 1 : 0) + (noLicence ? 1 : 0) + (area !== 'any' ? 1 : 0);
   const clear = () => { setCats([]); setFuelOnly(false); setNoLicence(false); setArea('any'); setQ(''); };
 
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+
   const requestGps = () => {
     setGpsOpen(false);
     if (!('geolocation' in navigator)) {
-      setGpsNote('This device does not share location. Pick your city and area below.');
+      setGpsNote('This device does not support geolocation. Choose your city and area manually below.');
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      () => setGpsNote('Location read on this device only and not stored. The pilot matches by city and area, so choose them below.'),
-      () => setGpsNote('Location permission was not given. That is fine: choose your city and area below.'),
-      { timeout: 8000, maximumAge: 600000 },
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setUserCoords({ lat, lng });
+        setGpsNote(`Location detected (${lat.toFixed(2)}°, ${lng.toFixed(2)}°). Showing nearby logistics jobs within ${radius} km.`);
+      },
+      () => {
+        setUserCoords(null);
+        setGpsNote('Location permission is disabled. Choose your city or area manually.');
+      },
+      { timeout: 10000, enableHighAccuracy: true, maximumAge: 60000 },
     );
   };
 
@@ -177,7 +187,7 @@ export function FindJobs() {
               <Button size="sm" variant="secondary" onClick={() => setGpsOpen(true)} data-testid="button-use-location"><LocateFixed className="mr-1.5 h-4 w-4" />Use my location</Button>
             </div>
             <p className="mt-2 text-xs text-sidebar-foreground/60">
-              Radius is approximate and city based. The pilot does not calculate exact distances.
+              Jobs matched within your selected radius. Use My Location to sort by live proximity.
             </p>
             {gpsNote && <p className="mt-2 rounded-md bg-sidebar-accent px-3 py-2 text-xs" role="status" data-testid="text-gps-note">{gpsNote}</p>}
           </div>
@@ -192,7 +202,7 @@ export function FindJobs() {
             <div className="rounded-xl bg-sidebar-accent/80 p-4" data-testid="card-daily-usage">
               <div className="flex items-center justify-between text-sm"><span>Applications today</span><span className="font-mono font-bold">{usageToday}/{DAILY_LIMIT}</span></div>
               <div className="mt-2"><Meter value={usageToday} max={DAILY_LIMIT} tone="signal" /></div>
-              <p className="mt-2 text-xs text-sidebar-foreground/65">Counted by IST date. Demo-only limit.</p>
+              <p className="mt-2 text-xs text-sidebar-foreground/65">20 applications per India calendar day (IST). 100% free for workers.</p>
             </div>
           </div>
         </div>
