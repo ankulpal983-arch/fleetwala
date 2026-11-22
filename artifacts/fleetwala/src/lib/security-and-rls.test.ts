@@ -286,3 +286,46 @@ test('RLS Negative: Direct anonymous SELECT on public.audit_log returns 0 rows o
     assert.equal(data.length, 0, 'Unauthenticated callers must never see audit log');
   }
 });
+
+test('RLS Negative: Unauthenticated EXECUTE on review_job is denied', async () => {
+  const { error } = await anonClient.rpc('review_job', {
+    p_job_id: '6157b3c8-018c-4187-ba4c-cb6ec40d91a2',
+    p_approve: true,
+    p_reason: 'Testing RLS protection',
+  });
+  assert.notEqual(error, null, 'Unauthenticated execution of review_job must be rejected');
+  assert.equal(
+    error?.code === '42501' || error?.message?.includes('Administrator access required'),
+    true
+  );
+});
+
+test('RLS Negative: Unauthenticated EXECUTE on bootstrap_admin is denied', async () => {
+  const { error } = await anonClient.rpc('bootstrap_admin');
+  assert.notEqual(error, null, 'Unauthenticated execution of bootstrap_admin must be rejected');
+});
+
+test('RLS Negative: Unauthenticated EXECUTE on admin_assign_admin is denied', async () => {
+  const { error } = await anonClient.rpc('admin_assign_admin', {
+    p_target_user_id: '00000000-0000-0000-0000-000000000001',
+  });
+  assert.notEqual(error, null, 'Unauthenticated execution of admin_assign_admin must be rejected');
+});
+
+test('RLS Negative: Unauthenticated EXECUTE on discover_workers is denied', async () => {
+  const { error } = await anonClient.rpc('discover_workers');
+  assert.notEqual(error, null, 'Unauthenticated execution of discover_workers must be rejected');
+  assert.equal(
+    error?.code === '42501' || error?.message?.includes('Active verified employer membership required'),
+    true
+  );
+});
+
+test('RLS Negative: Unauthenticated EXECUTE on discover_candidates is denied', async () => {
+  const { error } = await anonClient.rpc('discover_candidates');
+  assert.notEqual(error, null, 'Unauthenticated execution of discover_candidates must be rejected');
+  assert.equal(
+    error?.code === '42501' || error?.message?.includes('Active verified employer membership required'),
+    true
+  );
+});
