@@ -13,6 +13,7 @@ const routesToTest = [
   { url: 'http://localhost:3000/onboarding/worker', name: 'onboarding-worker', expectedText: 'Worker Profile' },
   { url: 'http://localhost:3000/onboarding/employer', name: 'onboarding-employer', expectedText: 'Register Company' },
   { url: 'http://localhost:3000/employer', name: 'employer-dashboard', expectedText: 'Employer Workspace' },
+  { url: 'http://localhost:3000/employer/candidates', name: 'employer-candidates-guard', expectedText: 'Employer Workspace' },
   { url: 'http://localhost:3000/admin', name: 'admin-portal', expectedText: 'Administrator Access Denied' },
   { url: 'http://localhost:3000/privacy', name: 'privacy', expectedText: 'Privacy Policy' },
   { url: 'http://localhost:3000/terms', name: 'terms', expectedText: 'Terms of Service' },
@@ -146,6 +147,51 @@ async function runTestSuite() {
     if (currentErrors.length > 0) {
       console.log(`     Errors:`, currentErrors);
     }
+  }
+
+  // Dedicated regression test: Authenticated Employer Candidate Discovery
+  console.log('\nNavigating to authenticated employer candidate discovery (http://localhost:3000/employer/candidates)...');
+  currentErrors = [];
+  await send('Runtime.evaluate', { expression: "localStorage.setItem('fleetwala_test_auth', 'employer')" });
+  await send('Page.navigate', { url: 'http://localhost:3000/employer/candidates' });
+  await new Promise(r => setTimeout(r, 2000));
+
+  const authTitleRes = await send('Runtime.evaluate', { expression: 'document.title' });
+  const authTitle = authTitleRes?.result?.value || '';
+
+  const authBodyRes = await send('Runtime.evaluate', { expression: 'document.body.innerText' });
+  const authInnerText = authBodyRes?.result?.value || '';
+
+  const authHtmlRes = await send('Runtime.evaluate', { expression: 'document.getElementById("root")?.innerHTML || ""' });
+  const authHtmlLen = (authHtmlRes?.result?.value || '').length;
+
+  const hasFindCandidates = authInnerText.includes('Find Candidates');
+  const hasPrivacy = authInnerText.includes('Privacy Protection');
+  const hasMaskedBadge = authInnerText.includes('Masked ID');
+  const hasNoError = currentErrors.length === 0 && !authInnerText.includes('Something went wrong') && !authInnerText.includes('ShieldCheck is not defined');
+  const authCandidatePass = authHtmlLen > 500 && hasFindCandidates && hasPrivacy && hasNoError;
+
+  const ssAuth = await send('Page.captureScreenshot', { format: 'png' });
+  if (ssAuth?.data) {
+    fs.writeFileSync(path.join(screenshotsDir, 'employer-candidates-rendered.png'), Buffer.from(ssAuth.data, 'base64'));
+  }
+
+  // Cleanup test auth
+  await send('Runtime.evaluate', { expression: "localStorage.removeItem('fleetwala_test_auth')" });
+
+  results.push({
+    route: 'http://localhost:3000/employer/candidates [Auth]',
+    name: 'employer-candidates-auth',
+    title: authTitle,
+    htmlLen: authHtmlLen,
+    hasExpected: hasFindCandidates && hasPrivacy,
+    errors: currentErrors.slice(),
+    status: authCandidatePass ? 'PASS' : 'FAIL'
+  });
+
+  console.log(`  -> Title: "${authTitle}" | DOM length: ${authHtmlLen} | Status: ${authCandidatePass ? 'PASS' : 'FAIL'}`);
+  if (currentErrors.length > 0) {
+    console.log(`     Errors:`, currentErrors);
   }
 
   console.log('\n========================================');

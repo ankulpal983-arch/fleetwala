@@ -3,7 +3,7 @@ import { Link } from 'wouter';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Briefcase, CreditCard, Lock, Pencil, Plus, Send, Trash2, UserPlus, Users, UsersRound, Pause, Play, XCircle, ListChecks, Loader2, AlertCircle, MessageSquare, Mail } from 'lucide-react';
+import { Briefcase, CreditCard, Lock, Pencil, Plus, Send, Trash2, UserPlus, Users, UsersRound, Pause, Play, XCircle, ListChecks, Loader2, AlertCircle, MessageSquare, Mail, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -24,6 +24,7 @@ import { ago, istDate, istStamp, salaryRange } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { AppStatus, Candidate, Job, JobCategory, JobStatus, TeamMember, Thread } from '@/lib/types';
 import { liveMode, useSession } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth-context';
 import {
   discoverLiveCandidates, getLiveEmployerOrg, createLiveJobDraft,
   updateLiveJobDraft, submitLiveJobDraft, getLiveEmployerJobs, getLiveEmployerApplicants,
@@ -35,6 +36,7 @@ import {
 function useEmployer() {
   const p = usePilot();
   const { session } = useSession();
+  const { roleStatus } = useAuth();
   const [liveOrg, setLiveOrg] = useState<{ id: string; legal_name: string; employer_type: string; verification_state: string; role?: string } | null>(null);
   const [liveJobs, setLiveJobs] = useState<Job[] | null>(null);
   const [liveApplicants, setLiveApplicants] = useState<LiveApplicant[] | null>(null);
@@ -76,7 +78,7 @@ function useEmployer() {
   }, [session]);
 
   if (liveMode && session) {
-    const orgName = liveOrg?.legal_name || 'My Organization';
+    const orgName = liveOrg?.legal_name || roleStatus?.employerOrg?.legal_name || 'My Organization';
     const orgStatus = (liveOrg?.verification_state === 'verified' ? 'verified' : liveOrg?.verification_state === 'suspended' ? 'suspended' : 'unverified') as any;
     return {
       ...p,
@@ -95,7 +97,7 @@ function useEmployer() {
   const jobIds = new Set(jobs.map((j) => j.id));
   const apps = p.state.applications.filter((a) => jobIds.has(a.job_id));
   const employer = p.state.employers.find((e) => e.id === PILOT_EMPLOYER_ID);
-  return { ...p, jobs, apps, employer, liveOrg: null, orgName: 'My Organization', isLive: false, loading: false, refreshLive: () => {} };
+  return { ...p, jobs, apps, employer, liveOrg: null, orgName: roleStatus?.employerOrg?.legal_name || 'My Organization', isLive: false, loading: false, refreshLive: () => {} };
 }
 
 export function EmployerOverview() {
@@ -198,7 +200,7 @@ const toForm = (j?: Job): JobForm => ({
   fuel_allowance: j?.fuel_allowance ?? false, licence_required: j?.licence_required ?? false, description: j?.description ?? '',
 });
 
-function JobDialog({ open, onOpenChange, job, orgId, onSuccess }: { open: boolean; onOpenChange: (o: boolean) => void; job?: Job; orgId?: string; onSuccess?: () => void }) {
+function JobDialog({ open, onOpenChange, job, orgId, orgName, onSuccess }: { open: boolean; onOpenChange: (o: boolean) => void; job?: Job; orgId?: string; orgName?: string; onSuccess?: () => void }) {
   const { actions } = usePilot();
   const { session } = useSession();
   const { toast } = useToast();
@@ -291,7 +293,7 @@ function JobDialog({ open, onOpenChange, job, orgId, onSuccess }: { open: boolea
         setIsSubmitting(false);
       }
     } else {
-      const companyName = orgName || 'My Organization';
+      const companyName = orgName || job?.company || 'My Organization';
       const id = actions.saveJob(input, PILOT_EMPLOYER_ID, companyName, job?.id);
       if (submit) actions.setJobStatus(id, 'pending', companyName);
       toast({
@@ -564,7 +566,7 @@ export function EmployerJobs() {
           </Table>
         </div>
       )}
-      <JobDialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) refreshLive(); }} job={editing} orgId={employer?.id} onSuccess={refreshLive} />
+      <JobDialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) refreshLive(); }} job={editing} orgId={employer?.id} orgName={orgName} onSuccess={refreshLive} />
     </div>
   );
 }

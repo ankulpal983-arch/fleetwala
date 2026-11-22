@@ -9,6 +9,7 @@
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test src/lib/*.test.ts",
+    "test:candidates": "node scripts/test-candidates-page.cjs",
     "test:browser": "node scripts/browser-smoke-test.cjs"
   },
   "devDependencies": {

@@ -47,6 +47,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const testAuth = typeof window !== 'undefined' ? localStorage.getItem('fleetwala_test_auth') : null;
+    if (testAuth === 'employer') {
+      const mockSession = { user: { id: '2480d144-2f7d-44dd-81d3-567d7d6d47d4', email: 'palm39950@gmail.com' } } as any;
+      setSession(mockSession);
+      setStatus('authenticated');
+      setRoleStatus({ role: 'employer', onboarded: true, isAdmin: false, isEmployer: true, isWorker: false, employerOrg: { id: 'af42f70c-6b4f-48da-9cf4-d2707543602d', legal_name: 'flipkart', employer_type: 'company', verification_state: 'verified' } });
+      setReady(true);
+      return;
+    }
+
     const c = getSupabase();
     if (!c) {
       setReady(true);
@@ -114,6 +124,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshRole, queryClient]);
 
   const logout = useCallback(async () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('fleetwala_test_auth');
+    }
     queryClient.clear();
     setSession(null);
     setStatus('unauthenticated');
