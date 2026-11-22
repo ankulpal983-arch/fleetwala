@@ -187,7 +187,10 @@ Executed `corepack pnpm test` (`tsx --test src/lib/*.test.ts`):
 
 ---
 
-## 9. REMAINING BLOCKERS
+## 9. REMAINING BLOCKERS & GIT METRICS
 
-- **None.** All 14 acceptance criteria are fully met.
-- Real employer organization resolution, job draft creation, and submission to admin review are live, secure, verified, and operational in Supabase project `jigbzsaaowtyaqhreplg`.
+- **Remaining Blockers:** None. All 14 acceptance criteria are fully met.
+- **Git Commit SHA:** `7fd5778`
+- **Target Branch:** `real-preproduction-conversion`
+- **Verification Evidence:** Real employer organization resolution, job draft creation (`6157b3c8-018c-4187-ba4c-cb6ec40d91a2`), and submission to admin review are live, secure, verified, and operational in Supabase project `jigbzsaaowtyaqhreplg`.
+
