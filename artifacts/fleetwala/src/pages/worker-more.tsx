@@ -21,9 +21,13 @@ import { CITIES, CITY_NAMES, EXPERIENCE, VEHICLES } from '@/lib/fixtures';
 import { profileProgress, STORAGE_KEY, usePilot } from '@/lib/store';
 import { ago, istStamp } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { AppStatus, Application } from '@/lib/types';
+import type { AppStatus, Application, Notice, Thread } from '@/lib/types';
 import { liveMode, useSession } from '@/lib/supabase';
-import { getLiveWorkerProfile, saveLiveWorkerProfile, getLiveApplications } from '@/lib/repo';
+import {
+  getLiveWorkerProfile, saveLiveWorkerProfile, getLiveApplications,
+  getLiveNotifications, markLiveNotificationRead, getLiveConversations,
+  sendLiveMessage
+} from '@/lib/repo';
 
 const FLOW: AppStatus[] = ['applied', 'viewed', 'shortlisted', 'hired'];
 
@@ -112,38 +116,67 @@ export function Applications() {
 
 export function Messages() {
   const { state, actions } = usePilot();
-  const [activeId, setActiveId] = useState(state.threads[0]?.id ?? '');
+  const { session } = useSession();
+  const [liveThreads, setLiveThreads] = useState<Thread[] | null>(null);
+  const [activeId, setActiveId] = useState('');
   const [text, setText] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
-  const thread = state.threads.find((t) => t.id === activeId);
+
+  const refreshThreads = () => {
+    if (liveMode && session) {
+      getLiveConversations().then((threads) => {
+        setLiveThreads(threads);
+        if (threads && threads.length > 0 && !activeId) {
+          setActiveId(threads[0].id);
+        }
+      });
+    }
+  };
+
+  useEffect(() => {
+    refreshThreads();
+  }, [session]);
+
+  const threadsSource = (liveMode && session) ? (liveThreads ?? []) : state.threads;
+  const currentActiveId = activeId || (threadsSource[0]?.id ?? '');
+  const thread = threadsSource.find((t) => t.id === currentActiveId);
   const count = thread?.messages.length ?? 0;
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, [count]);
 
-  const send = (e: React.FormEvent) => {
+  const send = async (e: React.FormEvent) => {
     e.preventDefault();
     const t = text.trim();
     if (!t || !thread) return;
+
+    if (liveMode && session) {
+      const res = await sendLiveMessage(thread.id, t.slice(0, 600));
+      if (res.ok) {
+        setText('');
+        refreshThreads();
+      }
+      return;
+    }
+
     actions.sendMessage(thread.id, t.slice(0, 600));
     setText('');
   };
 
   return (
     <div>
-      <PageHeader eyebrow="Worker" title="Messages" description="Text-only chat opens after an employer shortlists you. Sample participants only in the pilot." />
-      {state.threads.length === 0 ? (
+      <PageHeader eyebrow="Worker" title="Messages" description="Text-only chat opens after an employer shortlists you. Phone numbers stay hidden." />
+      {threadsSource.length === 0 ? (
         <EmptyState icon={MessageSquare} title="No conversations" body="When an employer shortlists you, a chat appears here." />
       ) : (
         <div className="grid overflow-hidden rounded-2xl border bg-card md:h-[560px] md:grid-cols-[280px_1fr]">
           <ul className="border-b md:border-b-0 md:border-r">
-            {state.threads.map((t) => {
-              const job = state.jobs.find((j) => j.id === t.job_id);
+            {threadsSource.map((t) => {
               const last = t.messages[t.messages.length - 1];
               return (
                 <li key={t.id}>
-                  <button onClick={() => setActiveId(t.id)} className={cn('flex w-full gap-3 p-4 text-left transition-colors', t.id === activeId ? 'bg-plate/20' : 'hover:bg-muted')} data-testid={`button-thread-${t.id}`}>
-                    <Monogram name={job?.company ?? t.participant} size="sm" />
+                  <button onClick={() => setActiveId(t.id)} className={cn('flex w-full gap-3 p-4 text-left transition-colors', t.id === currentActiveId ? 'bg-plate/20' : 'hover:bg-muted')} data-testid={`button-thread-${t.id}`}>
+                    <Monogram name={t.participant} size="sm" />
                     <span className="min-w-0"><span className="block truncate text-sm font-semibold">{t.participant}</span>
-                      <span className="block truncate text-xs text-muted-foreground">{last?.text}</span></span>
+                      <span className="block truncate text-xs text-muted-foreground">{last?.text || 'Conversation opened'}</span></span>
                   </button>
                 </li>
               );
@@ -153,7 +186,7 @@ export function Messages() {
             <div className="flex min-h-[420px] flex-col">
               <div className="border-b px-4 py-3">
                 <p className="font-semibold">{thread.participant}</p>
-                <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><SampleTag />{thread.role} · phone numbers stay hidden</p>
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">{!(liveMode && session) && <SampleTag />}{thread.role} · phone numbers stay hidden</p>
               </div>
               <div className="flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
                 {thread.messages.map((m) => (
@@ -179,16 +212,50 @@ export function Messages() {
 
 export function Notifications() {
   const { state, actions } = usePilot();
-  const unread = state.notifications.filter((n) => !n.read).length;
+  const { session } = useSession();
+  const [liveNotices, setLiveNotices] = useState<Notice[] | null>(null);
+
+  const refreshNotices = () => {
+    if (liveMode && session) {
+      getLiveNotifications().then(setLiveNotices);
+    }
+  };
+
+  useEffect(() => {
+    refreshNotices();
+  }, [session]);
+
+  const noticesSource = (liveMode && session) ? (liveNotices ?? []) : state.notifications;
+  const unread = noticesSource.filter((n) => !n.read).length;
+
+  const handleMarkRead = async (id: string) => {
+    if (liveMode && session) {
+      await markLiveNotificationRead(id);
+      refreshNotices();
+      return;
+    }
+    actions.markNotice(id);
+  };
+
+  const handleMarkAll = async () => {
+    if (liveMode && session) {
+      const unreadList = noticesSource.filter((n) => !n.read);
+      await Promise.all(unreadList.map((n) => markLiveNotificationRead(n.id)));
+      refreshNotices();
+      return;
+    }
+    actions.markAllNotices();
+  };
+
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader eyebrow="Worker" title="Notifications" description={`${unread} unread`}
-        actions={<Button variant="outline" size="sm" onClick={actions.markAllNotices} disabled={unread === 0} data-testid="button-mark-all"><CheckCheck className="mr-1.5 h-4 w-4" />Mark all read</Button>} />
-      {state.notifications.length === 0 ? (
-        <EmptyState icon={Bell} title="All quiet" body="Updates on your applications and new nearby jobs will land here." />
+        actions={<Button variant="outline" size="sm" onClick={handleMarkAll} disabled={unread === 0} data-testid="button-mark-all"><CheckCheck className="mr-1.5 h-4 w-4" />Mark all read</Button>} />
+      {noticesSource.length === 0 ? (
+        <EmptyState icon={Bell} title="All quiet" body="Updates on your applications, reviews, and new messages will land here." />
       ) : (
         <ul className="divide-y overflow-hidden rounded-xl border bg-card">
-          {state.notifications.map((n) => (
+          {noticesSource.map((n) => (
             <li key={n.id} className={cn('flex items-start gap-3 p-4', !n.read && 'bg-plate/10')} data-testid={`row-notification-${n.id}`}>
               <span className={cn('mt-1.5 h-2 w-2 shrink-0 rounded-full', n.read ? 'bg-muted' : 'bg-chart-4')} />
               <div className="flex-1">
@@ -197,8 +264,8 @@ export function Notifications() {
                 <p className="mt-1 font-mono text-[10px] text-muted-foreground">{ago(n.at)}</p>
               </div>
               <div className="flex flex-col items-end gap-1">
-                {n.href && <Link href={n.href} onClick={() => actions.markNotice(n.id)} className="text-sm font-medium text-primary underline">Open</Link>}
-                {!n.read && <button onClick={() => actions.markNotice(n.id)} className="text-xs text-muted-foreground hover:underline" data-testid={`button-read-${n.id}`}>Mark read</button>}
+                {n.href && <Link href={n.href} onClick={() => handleMarkRead(n.id)} className="text-sm font-medium text-primary underline">Open</Link>}
+                {!n.read && <button onClick={() => handleMarkRead(n.id)} className="text-xs text-muted-foreground hover:underline" data-testid={`button-read-${n.id}`}>Mark read</button>}
               </div>
             </li>
           ))}

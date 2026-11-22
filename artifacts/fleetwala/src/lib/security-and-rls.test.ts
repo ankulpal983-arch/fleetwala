@@ -202,3 +202,87 @@ test('Pricing Integrity: Official PRD baseline pricing configuration', () => {
   assert.equal(PRD_PRICING.JOB_POSTING_INR, 99);
   assert.equal(PRD_PRICING.CANDIDATE_UNLOCK_INR, 10);
 });
+
+// --- Phase 15: Mandatory Multi-Tenant & RLS Negative Test Assertions ---
+
+test('RLS Negative: Direct anonymous INSERT into public.admin_principals is blocked', async () => {
+  const { error } = await anonClient.from('admin_principals').insert({
+    user_id: '00000000-0000-0000-0000-000000000001',
+  });
+  assert.notEqual(error, null, 'Direct insert into admin_principals must be strictly rejected');
+});
+
+test('RLS Negative: Direct anonymous UPDATE on public.employers (self-verify attempt) is blocked', async () => {
+  const { error } = await anonClient
+    .from('employers')
+    .update({ verification_state: 'verified' })
+    .eq('legal_name', 'Any Org');
+  assert.notEqual(error, null, 'Self-verification update by unauthenticated user must be strictly rejected');
+});
+
+test('RLS Negative: Unauthenticated EXECUTE on admin_review_employer is denied', async () => {
+  const { error } = await anonClient.rpc('admin_review_employer', {
+    p_employer_id: '00000000-0000-0000-0000-000000000001',
+    p_decision: 'verified',
+    p_reason: 'Testing RLS',
+  });
+  assert.notEqual(error, null, 'Unauthenticated execution of admin_review_employer must be rejected');
+  assert.equal(
+    error?.code === '42501' || error?.message?.includes('Administrator access required'),
+    true
+  );
+});
+
+test('RLS Negative: Unauthenticated EXECUTE on set_application_status is denied', async () => {
+  const { error } = await anonClient.rpc('set_application_status', {
+    p_application_id: '00000000-0000-0000-0000-000000000001',
+    p_status: 'shortlisted' as any,
+  });
+  assert.notEqual(error, null, 'Unauthenticated execution of set_application_status must be rejected');
+});
+
+test('RLS Negative: Unauthenticated EXECUTE on send_message is denied', async () => {
+  const { error } = await anonClient.rpc('send_message', {
+    p_conversation_id: '00000000-0000-0000-0000-000000000001',
+    p_body: 'Hello candidate',
+  });
+  assert.notEqual(error, null, 'Unauthenticated execution of send_message must be rejected');
+});
+
+test('RLS Negative: Unauthenticated EXECUTE on admin_grant_staging_job_waiver is denied', async () => {
+  const { error } = await anonClient.rpc('admin_grant_staging_job_waiver', {
+    p_job_id: '00000000-0000-0000-0000-000000000001',
+    p_reason: 'Testing waiver',
+  });
+  assert.notEqual(error, null, 'Unauthenticated execution of admin_grant_staging_job_waiver must be rejected');
+});
+
+test('RLS Negative: Direct anonymous SELECT on public.messages returns 0 rows or error', async () => {
+  const { data, error } = await anonClient.from('messages').select('*');
+  if (error) {
+    assert.equal(error.code, '42501');
+  } else {
+    assert.equal(Array.isArray(data), true);
+    assert.equal(data.length, 0, 'Unauthenticated callers must never see chat messages');
+  }
+});
+
+test('RLS Negative: Direct anonymous SELECT on public.notifications returns 0 rows or error', async () => {
+  const { data, error } = await anonClient.from('notifications').select('*');
+  if (error) {
+    assert.equal(error.code, '42501');
+  } else {
+    assert.equal(Array.isArray(data), true);
+    assert.equal(data.length, 0, 'Unauthenticated callers must never see notifications');
+  }
+});
+
+test('RLS Negative: Direct anonymous SELECT on public.audit_log returns 0 rows or error', async () => {
+  const { data, error } = await anonClient.from('audit_log').select('*');
+  if (error) {
+    assert.equal(error.code, '42501');
+  } else {
+    assert.equal(Array.isArray(data), true);
+    assert.equal(data.length, 0, 'Unauthenticated callers must never see audit log');
+  }
+});

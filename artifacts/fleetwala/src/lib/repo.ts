@@ -5,13 +5,40 @@
  */
 
 import { getSupabase, supabaseConfigured } from './supabase';
-import type { AppStatus, Application, Candidate, Job, JobStatus, WorkerProfile } from './types';
+import type { AppStatus, Application, Candidate, Employer, Job, JobStatus, Notice, Thread, WorkerProfile } from './types';
 import type { JobInput } from './store';
 
 export interface RepositoryResult<T = void> {
   ok: boolean;
   data?: T;
   error?: string;
+}
+
+/** Application status mapping between UI labels and PostgreSQL application_state enum */
+export function toDbAppStatus(status: AppStatus): string {
+  if (status === 'viewed') return 'reviewing';
+  return status;
+}
+
+export function fromDbAppStatus(status?: string | null): AppStatus {
+  if (!status) return 'applied';
+  if (status === 'reviewing') return 'viewed';
+  return status as AppStatus;
+}
+
+/** Job state mapping between UI status and PostgreSQL job_state enum */
+export function toDbJobState(status: JobStatus): string {
+  if (status === 'pending') return 'pending_review';
+  if (status === 'approved') return 'published';
+  return status;
+}
+
+export function fromDbJobState(state?: string | null): JobStatus {
+  if (!state) return 'draft';
+  if (state === 'pending_review') return 'pending';
+  if (state === 'published') return 'approved';
+  if (state === 'rejected') return 'draft';
+  return state as JobStatus;
 }
 
 /** Experience band mapping between UI labels and PostgreSQL check constraint values */
@@ -102,37 +129,43 @@ export async function getLiveJobs(): Promise<Job[] | null> {
 }
 
 /** Fetch employer jobs from Supabase */
-export async function getLiveEmployerJobs(): Promise<Job[] | null> {
+export async function getLiveEmployerJobs(employerId?: string): Promise<Job[] | null> {
   const c = getSupabase();
   if (!c) return null;
 
-  const { data, error } = await c
+  let query = c
     .from('jobs')
-    .select('*')
+    .select('*, employers(legal_name)')
     .order('created_at', { ascending: false });
+
+  if (employerId) {
+    query = query.eq('employer_id', employerId);
+  }
+
+  const { data, error } = await query;
 
   if (error || !data) {
     return null;
   }
 
-  return data.map((j) => ({
+  return data.map((j: any) => ({
     id: j.id,
     employer_id: j.employer_id,
     title: j.title,
-    company: 'Ghar-Tak Parcels',
+    company: j.employers?.legal_name || 'My Organization',
     city: j.city,
     area: j.area || 'Central',
     category: j.category as any,
     min_salary: j.salary_min_inr || 18000,
     max_salary: j.salary_max_inr || 24000,
-    shift: 'Day 9–6',
+    shift: 'General',
     vehicle: j.requires_driving_licence ? 'Two-wheeler' : 'None needed',
     fuel_allowance: true,
     licence_required: j.requires_driving_licence || false,
     experience: '1–3 years',
     description: j.description,
     openings: 1,
-    status: (j.state === 'published' ? 'approved' : j.state) as JobStatus,
+    status: fromDbJobState(j.state),
     expires_at: j.expires_at || new Date(Date.now() + 30 * 86400000).toISOString(),
     created_at: j.created_at,
     moderation_note: j.review_note,
@@ -514,4 +547,321 @@ export async function resolveUserRoleStatus(): Promise<UserRoleStatus> {
     isWorker: true,
     workerProfile,
   };
+}
+
+export interface LiveApplicant extends Application {
+  job_title: string;
+  candidate_code: string;
+  worker_summary: string;
+}
+
+/** Fetch live applicants for jobs owned by the current employer */
+export async function getLiveEmployerApplicants(employerId?: string): Promise<LiveApplicant[] | null> {
+  const c = getSupabase();
+  if (!c) return null;
+
+  let query = c
+    .from('job_applications')
+    .select(`
+      id,
+      job_id,
+      created_at,
+      status_history:application_status_history(old_status, new_status, changed_at),
+      job:jobs!inner(id, title, city, area, employer_id, employers(legal_name)),
+      worker:workers(id, city, experience_band, vehicle_type, has_own_vehicle)
+    `)
+    .order('created_at', { ascending: false });
+
+  if (employerId) {
+    query = query.eq('job.employer_id', employerId);
+  }
+
+  const { data, error } = await query;
+  if (error || !data) {
+    console.warn('[Repo] getLiveEmployerApplicants error:', error?.message);
+    return null;
+  }
+
+  return data.map((item: any) => {
+    const history = (item.status_history || []).sort(
+      (a: any, b: any) => new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime()
+    );
+    const latestDbStatus = history.length > 0 ? history[history.length - 1].new_status : 'applied';
+    const uiStatus = fromDbAppStatus(latestDbStatus);
+    const worker = item.worker;
+    const candidateCode = worker?.id ? `FW-${worker.id.slice(0, 6).toUpperCase()}` : 'FW-CANDIDATE';
+    const workerSummary = worker
+      ? `${worker.city || 'Local'} · ${fromDbExperience(worker.experience_band)} · ${fromDbVehicle(worker.vehicle_type)}`
+      : 'Verified candidate';
+
+    return {
+      id: item.id,
+      job_id: item.job_id,
+      candidate_id: worker?.id || 'candidate',
+      status: uiStatus,
+      created_at: item.created_at,
+      history: history.map((h: any) => ({
+        status: fromDbAppStatus(h.new_status),
+        at: h.changed_at,
+      })),
+      company: item.job?.employers?.legal_name || 'My Organization',
+      job_title: item.job?.title || 'Logistics Role',
+      candidate_code: candidateCode,
+      worker_summary: workerSummary,
+    };
+  });
+}
+
+/** Transition application status via atomic backend RPC */
+export async function setLiveApplicationStatus(applicationId: string, status: AppStatus): Promise<RepositoryResult> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const dbStatus = toDbAppStatus(status);
+  const { error } = await c.rpc('set_application_status', {
+    p_application_id: applicationId,
+    p_status: dbStatus as any,
+  });
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/** Fetch jobs for Admin moderation queue */
+export async function getLiveAdminJobs(): Promise<Job[] | null> {
+  const c = getSupabase();
+  if (!c) return null;
+
+  const { data, error } = await c
+    .from('jobs')
+    .select('*, employers(id, legal_name, verification_state)')
+    .order('created_at', { ascending: false });
+
+  if (error || !data) {
+    console.warn('[Repo] getLiveAdminJobs error:', error?.message);
+    return null;
+  }
+
+  return data.map((j: any) => ({
+    id: j.id,
+    employer_id: j.employer_id,
+    title: j.title,
+    company: j.employers?.legal_name || 'Verified Logistics Partner',
+    city: j.city,
+    area: j.area || 'Central',
+    category: j.category as any,
+    min_salary: j.salary_min_inr || 18000,
+    max_salary: j.salary_max_inr || 24000,
+    shift: 'General',
+    vehicle: j.requires_driving_licence ? 'Two-wheeler with licence' : 'None',
+    fuel_allowance: true,
+    licence_required: j.requires_driving_licence || false,
+    experience: '1-3 years',
+    description: j.description,
+    openings: 1,
+    status: fromDbJobState(j.state),
+    expires_at: j.expires_at || new Date(Date.now() + 30 * 86400000).toISOString(),
+    created_at: j.created_at,
+    moderation_note: j.review_note,
+  }));
+}
+
+/** Fetch all employers for Admin review */
+export async function getLiveAdminEmployers(): Promise<Employer[] | null> {
+  const c = getSupabase();
+  if (!c) return null;
+
+  const { data, error } = await c
+    .from('employers')
+    .select('id, legal_name, employer_type, verification_state, created_at')
+    .order('created_at', { ascending: false });
+
+  if (error || !data) {
+    console.warn('[Repo] getLiveAdminEmployers error:', error?.message);
+    return null;
+  }
+
+  return data.map((e: any) => ({
+    id: e.id,
+    name: e.legal_name,
+    city: 'India',
+    kind: e.employer_type === 'vendor_dsp' ? 'DSP Partner' : e.employer_type === 'recruitment_agency' ? 'Agency' : 'Enterprise',
+    status: (e.verification_state === 'pending' ? 'unverified' : e.verification_state) as any,
+    joined: e.created_at,
+  }));
+}
+
+/** Admin review employer verification state */
+export async function adminReviewLiveEmployer(
+  employerId: string,
+  decision: 'verified' | 'rejected' | 'suspended',
+  reason: string
+): Promise<RepositoryResult> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { error } = await c.rpc('admin_review_employer', {
+    p_employer_id: employerId,
+    p_decision: decision,
+    p_reason: reason,
+  });
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/** Fetch user notifications */
+export async function getLiveNotifications(): Promise<Notice[] | null> {
+  const c = getSupabase();
+  if (!c) return null;
+
+  const { data: { user } } = await c.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await c
+    .from('notifications')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false });
+
+  if (error || !data) return null;
+
+  return data.map((n: any) => {
+    let title = 'FleetWala Notification';
+    let body = 'You have a new update.';
+    let href = undefined;
+
+    if (n.kind === 'application_received') {
+      title = 'New Application Received';
+      body = `A worker applied to your job listing: ${n.payload?.job_title || ''}.`;
+      href = '/employer/applicants';
+    } else if (n.kind === 'application_status_update') {
+      title = `Application ${n.payload?.new_status ? n.payload.new_status.toUpperCase() : 'Updated'}`;
+      body = `Your application for ${n.payload?.job_title || 'logistics role'} at ${n.payload?.company || 'FleetWala'} was updated to ${n.payload?.new_status}.`;
+      href = '/applications';
+    } else if (n.kind === 'job_moderation_update') {
+      title = `Job Posting ${n.payload?.state ? n.payload.state.toUpperCase() : 'Moderated'}`;
+      body = `Your job listing "${n.payload?.job_title}" is now ${n.payload?.state}.${n.payload?.reason ? ` Note: ${n.payload.reason}` : ''}`;
+      href = '/employer/jobs';
+    } else if (n.kind === 'employer_verification_update') {
+      title = `Employer Verification: ${n.payload?.decision ? n.payload.decision.toUpperCase() : 'Updated'}`;
+      body = `Your organization verification has been marked ${n.payload?.decision}.${n.payload?.reason ? ` Note: ${n.payload.reason}` : ''}`;
+      href = '/employer';
+    } else if (n.kind === 'new_message') {
+      title = 'New Message';
+      body = `You received a message: "${n.payload?.preview || '...'}"`;
+      href = '/messages';
+    }
+
+    return {
+      id: n.id,
+      title,
+      body,
+      at: n.created_at,
+      read: Boolean(n.read_at),
+      href,
+    };
+  });
+}
+
+/** Mark notification read */
+export async function markLiveNotificationRead(notificationId: string): Promise<RepositoryResult> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { error } = await c.rpc('mark_notification_read', { p_notification_id: notificationId });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/** Fetch live chat conversations */
+export async function getLiveConversations(): Promise<Thread[] | null> {
+  const c = getSupabase();
+  if (!c) return null;
+
+  const { data: { user } } = await c.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await c
+    .from('conversations')
+    .select(`
+      id,
+      created_at,
+      application:job_applications!inner(
+        id,
+        status,
+        job:jobs!inner(id, title, employer_id, employers(legal_name)),
+        worker:workers(id, full_name, user_id)
+      ),
+      messages(id, sender_id, body, created_at)
+    `)
+    .order('created_at', { ascending: false });
+
+  if (error || !data) {
+    console.warn('[Repo] getLiveConversations error:', error?.message);
+    return null;
+  }
+
+  return data.map((conv: any) => {
+    const isWorkerUser = conv.application?.worker?.user_id === user.id;
+    const participantName = isWorkerUser
+      ? (conv.application?.job?.employers?.legal_name || 'Hiring Manager')
+      : 'Shortlisted Candidate';
+    const participantRole = isWorkerUser ? 'Employer' : 'Candidate';
+
+    const sortedMessages = (conv.messages || []).sort(
+      (a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+
+    return {
+      id: conv.id,
+      participant: participantName,
+      role: participantRole,
+      job_id: conv.application?.job?.id || '',
+      messages: sortedMessages.map((m: any) => ({
+        id: m.id,
+        from: m.sender_id === user.id ? 'me' : 'them',
+        text: m.body,
+        at: m.created_at,
+      })),
+    };
+  });
+}
+
+/** Send live message in chat */
+export async function sendLiveMessage(conversationId: string, body: string): Promise<RepositoryResult<{ messageId: string }>> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { data, error } = await c.rpc('send_message', {
+    p_conversation_id: conversationId,
+    p_body: body.trim(),
+  });
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, data: { messageId: data } };
+}
+
+/** Bootstrap one-time Administrator seat */
+export async function bootstrapLiveAdmin(): Promise<RepositoryResult<boolean>> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { data, error } = await c.rpc('bootstrap_admin');
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, data: Boolean(data) };
+}
+
+/** Grant staging job waiver (admin only) */
+export async function grantLiveStagingJobWaiver(jobId: string, reason: string): Promise<RepositoryResult> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { error } = await c.rpc('admin_grant_staging_job_waiver', {
+    p_job_id: jobId,
+    p_reason: reason,
+  });
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }

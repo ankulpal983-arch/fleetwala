@@ -23,34 +23,91 @@ import { ago, istDate, salaryRange } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { AppStatus, Candidate, Job, JobCategory, JobStatus, TeamMember } from '@/lib/types';
 import { liveMode, useSession } from '@/lib/supabase';
-import { discoverLiveCandidates, getLiveEmployerOrg, createLiveJobDraft, submitLiveJobDraft } from '@/lib/repo';
+import {
+  discoverLiveCandidates, getLiveEmployerOrg, createLiveJobDraft,
+  submitLiveJobDraft, getLiveEmployerJobs, getLiveEmployerApplicants,
+  setLiveApplicationStatus, type LiveApplicant
+} from '@/lib/repo';
 
 const COMPANY = 'Ghar-Tak Parcels';
 
 function useEmployer() {
   const p = usePilot();
+  const { session } = useSession();
+  const [liveOrg, setLiveOrg] = useState<{ id: string; legal_name: string; employer_type: string; verification_state: string } | null>(null);
+  const [liveJobs, setLiveJobs] = useState<Job[] | null>(null);
+  const [liveApplicants, setLiveApplicants] = useState<LiveApplicant[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const refreshLive = () => {
+    if (liveMode && session) {
+      setLoading(true);
+      getLiveEmployerOrg().then((org) => {
+        setLiveOrg(org);
+        if (org) {
+          Promise.all([
+            getLiveEmployerJobs(org.id),
+            getLiveEmployerApplicants(org.id),
+          ]).then(([j, a]) => {
+            setLiveJobs(j ?? []);
+            setLiveApplicants(a ?? []);
+            setLoading(false);
+          });
+        } else {
+          setLiveJobs([]);
+          setLiveApplicants([]);
+          setLoading(false);
+        }
+      });
+    }
+  };
+
+  useEffect(() => {
+    refreshLive();
+  }, [session]);
+
+  if (liveMode && session) {
+    const orgName = liveOrg?.legal_name || 'My Organization';
+    const orgStatus = (liveOrg?.verification_state === 'verified' ? 'verified' : liveOrg?.verification_state === 'suspended' ? 'suspended' : 'unverified') as any;
+    return {
+      ...p,
+      jobs: liveJobs ?? [],
+      apps: liveApplicants ?? [],
+      employer: liveOrg ? { id: liveOrg.id, name: orgName, city: 'India', kind: liveOrg.employer_type, status: orgStatus, joined: '' } : undefined,
+      orgName,
+      isLive: true,
+      loading,
+      refreshLive,
+    };
+  }
+
   const jobs = p.state.jobs.filter((j) => j.employer_id === PILOT_EMPLOYER_ID);
   const jobIds = new Set(jobs.map((j) => j.id));
   const apps = p.state.applications.filter((a) => jobIds.has(a.job_id));
   const employer = p.state.employers.find((e) => e.id === PILOT_EMPLOYER_ID);
-  return { ...p, jobs, apps, employer };
+  return { ...p, jobs, apps, employer, orgName: COMPANY, isLive: false, loading: false, refreshLive: () => {} };
 }
 
 export function EmployerOverview() {
-  const { jobs, apps, employer } = useEmployer();
+  const { jobs, apps, employer, orgName, isLive } = useEmployer();
   const by = (s: string) => apps.filter((a) => a.status === s).length;
-  const funnel: [string, number][] = [['Applied', apps.length], ['Viewed', apps.filter((a) => a.history.some((h) => h.status === 'viewed')).length], ['Shortlisted', apps.filter((a) => a.history.some((h) => h.status === 'shortlisted')).length], ['Hired', by('hired')]];
+  const funnel: [string, number][] = [
+    ['Applied', apps.length],
+    ['Viewed', apps.filter((a) => a.history.some((h) => h.status === 'viewed')).length],
+    ['Shortlisted', apps.filter((a) => a.history.some((h) => h.status === 'shortlisted')).length],
+    ['Hired', by('hired')]
+  ];
   const max = Math.max(1, funnel[0][1]);
   return (
     <div>
-      <PageHeader eyebrow={`${COMPANY} · sample employer`} title="Hiring overview"
+      <PageHeader eyebrow={`${orgName} · employer`} title="Hiring overview"
         description={<span className="inline-flex items-center gap-2">Verification: <StatusPill status={employer?.status ?? 'unverified'} /></span>}
         actions={<Link href="/employer/jobs" className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" data-testid="link-post-job"><Plus className="h-4 w-4" />Post a job</Link>} />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Live jobs" value={jobs.filter((j) => j.status === 'approved').length} hint={`${jobs.filter((j) => j.status === 'pending').length} awaiting review`} testId="stat-live-jobs" />
         <Stat label="New applicants" value={by('applied')} hint="Not yet viewed" />
         <Stat label="Shortlisted" value={by('shortlisted')} />
-        <Stat label="Hired" value={by('hired')} hint="This pilot" />
+        <Stat label="Hired" value={by('hired')} hint={isLive ? "Live" : "This pilot"} />
       </div>
       <div className="mt-6 grid gap-6 lg:grid-cols-[1.3fr_1fr]">
         <section className="rounded-2xl border bg-card p-5">
@@ -70,10 +127,18 @@ export function EmployerOverview() {
           <ul className="mt-3 divide-y text-sm">
             {[...apps].sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at)).slice(0, 5).map((a) => (
               <li key={a.id} className="flex items-center justify-between py-2.5">
-                <span><span className="font-mono font-semibold">{a.candidate_id === 'me' ? 'Pilot worker' : a.candidate_id.toUpperCase()}</span><span className="block text-xs text-muted-foreground">{jobs.find((j) => j.id === a.job_id)?.title}</span></span>
+                <span>
+                  <span className="font-mono font-semibold">
+                    {'candidate_code' in a ? (a as any).candidate_code : (a.candidate_id === 'me' ? 'Pilot worker' : a.candidate_id.toUpperCase())}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {'job_title' in a ? (a as any).job_title : jobs.find((j) => j.id === a.job_id)?.title}
+                  </span>
+                </span>
                 <StatusPill status={a.status} />
               </li>
             ))}
+            {apps.length === 0 && <li className="py-4 text-center text-xs text-muted-foreground">No applicants yet.</li>}
           </ul>
           <Link href="/employer/applicants" className="mt-3 inline-block text-sm font-medium text-primary underline">Review all</Link>
         </section>
@@ -200,17 +265,33 @@ function JobDialog({ open, onOpenChange, job }: { open: boolean; onOpenChange: (
 const STATUS_TABS: (JobStatus | 'all')[] = ['all', 'draft', 'pending', 'approved', 'paused', 'closed'];
 
 export function EmployerJobs() {
-  const { jobs, apps, actions } = useEmployer();
+  const { jobs, apps, actions, orgName, isLive, refreshLive } = useEmployer();
   const { toast } = useToast();
   const [filter, setFilter] = useState<JobStatus | 'all'>('all');
   const [editing, setEditing] = useState<Job | undefined>();
   const [open, setOpen] = useState(false);
   const list = jobs.filter((j) => filter === 'all' || j.status === filter);
-  const act = (j: Job, s: JobStatus, msg: string) => { actions.setJobStatus(j.id, s, COMPANY); toast({ title: msg, description: j.title }); };
+  
+  const act = async (j: Job, s: JobStatus, msg: string) => {
+    if (isLive) {
+      if (s === 'pending') {
+        const res = await submitLiveJobDraft(j.id);
+        if (!res.ok) {
+          toast({ title: 'Submission failed', description: res.error, variant: 'destructive' });
+          return;
+        }
+      }
+      refreshLive();
+      toast({ title: msg, description: j.title });
+      return;
+    }
+    actions.setJobStatus(j.id, s, orgName);
+    toast({ title: msg, description: j.title });
+  };
 
   return (
     <div>
-      <PageHeader eyebrow={COMPANY} title="Jobs" description="Drafts stay private. Submitted jobs go live only after admin approval."
+      <PageHeader eyebrow={orgName} title="Jobs" description="Drafts stay private. Submitted jobs go live only after admin approval."
         actions={<Button onClick={() => { setEditing(undefined); setOpen(true); }} data-testid="button-new-job"><Plus className="mr-1.5 h-4 w-4" />New job</Button>} />
       <div className="scrollbar-none mb-4 flex gap-1 overflow-x-auto">
         {STATUS_TABS.map((s) => (
@@ -241,7 +322,7 @@ export function EmployerJobs() {
                         <Button size="sm" onClick={() => act(j, 'pending', 'Submitted for review')} data-testid={`button-submit-${j.id}`}>Submit</Button>
                         <AlertDialog>
                           <AlertDialogTrigger asChild><Button size="sm" variant="ghost" aria-label="Delete draft" data-testid={`button-delete-${j.id}`}><Trash2 className="h-4 w-4 text-destructive" /></Button></AlertDialogTrigger>
-                          <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Delete this draft?</AlertDialogTitle><AlertDialogDescription>{j.title} will be removed from pilot data.</AlertDialogDescription></AlertDialogHeader>
+                          <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Delete this draft?</AlertDialogTitle><AlertDialogDescription>{j.title} will be removed.</AlertDialogDescription></AlertDialogHeader>
                             <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => actions.deleteJob(j.id)} data-testid="button-confirm-delete">Delete</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
                         </AlertDialog>
                       </>}
@@ -257,23 +338,44 @@ export function EmployerJobs() {
           </Table>
         </div>
       )}
-      <JobDialog open={open} onOpenChange={setOpen} job={editing} />
+      <JobDialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) refreshLive(); }} job={editing} />
     </div>
   );
 }
 
 const NEXT: Record<AppStatus, AppStatus[]> = {
-  applied: ['viewed', 'rejected'], viewed: ['shortlisted', 'rejected'], shortlisted: ['hired', 'rejected'], hired: [], rejected: [], withdrawn: [],
+  applied: ['viewed', 'shortlisted', 'rejected'],
+  viewed: ['shortlisted', 'rejected'],
+  shortlisted: ['hired', 'rejected'],
+  hired: [],
+  rejected: [],
+  withdrawn: [],
 };
 
 export function EmployerApplicants() {
-  const { jobs, apps, state, actions } = useEmployer();
+  const { jobs, apps, state, actions, orgName, isLive, refreshLive } = useEmployer();
   const { toast } = useToast();
   const [jobFilter, setJobFilter] = useState('all');
   const list = apps.filter((a) => jobFilter === 'all' || a.job_id === jobFilter).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+
+  const handleStatusChange = async (appId: string, status: AppStatus, label: string) => {
+    if (isLive) {
+      const res = await setLiveApplicationStatus(appId, status);
+      if (!res.ok) {
+        toast({ title: 'Failed to update status', description: res.error, variant: 'destructive' });
+        return;
+      }
+      refreshLive();
+      toast({ title: `Marked ${status}`, description: label });
+      return;
+    }
+    actions.setAppStatus(appId, status);
+    toast({ title: `Marked ${status}`, description: label });
+  };
+
   return (
     <div>
-      <PageHeader eyebrow={COMPANY} title="Applicants" description="Anonymous until hire. Contact details are never shown in the pilot."
+      <PageHeader eyebrow={orgName} title="Applicants" description="Anonymous until hire. Contact details are never shown without verification."
         actions={<Select value={jobFilter} onValueChange={setJobFilter}><SelectTrigger className="w-60" data-testid="select-applicant-job"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="all">All jobs</SelectItem>{jobs.map((j) => <SelectItem key={j.id} value={j.id}>{j.title}</SelectItem>)}</SelectContent></Select>} />
       {list.length === 0 ? <EmptyState icon={ListChecks} title="No applicants yet" body="Applicants appear once a job is approved and workers apply." /> : (
@@ -282,19 +384,24 @@ export function EmployerApplicants() {
             <TableHeader><TableRow><TableHead>Candidate</TableHead><TableHead className="hidden md:table-cell">Job</TableHead><TableHead className="hidden md:table-cell">Applied</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Move to</TableHead></TableRow></TableHeader>
             <TableBody>
               {list.map((a) => {
-                const c = state.candidates.find((x) => x.id === a.candidate_id);
-                const p = state.profile;
-                const label = c ? c.code : 'FW-PILOT';
-                const detail = c ? `${c.area} · ${c.experience} · ${c.vehicle}` : `${p.first_name} · ${p.area} · ${p.experience} · ${p.vehicle}`;
+                const isLiveApp = 'candidate_code' in a;
+                const label = isLiveApp ? (a as any).candidate_code : (state.candidates.find((x) => x.id === a.candidate_id)?.code || 'FW-PILOT');
+                const detail = isLiveApp
+                  ? (a as any).worker_summary
+                  : (state.candidates.find((x) => x.id === a.candidate_id)
+                      ? `${state.candidates.find((x) => x.id === a.candidate_id)?.area} · ${state.candidates.find((x) => x.id === a.candidate_id)?.experience} · ${state.candidates.find((x) => x.id === a.candidate_id)?.vehicle}`
+                      : `${state.profile.first_name} · ${state.profile.area} · ${state.profile.experience} · ${state.profile.vehicle}`);
+                const jobTitle = isLiveApp ? (a as any).job_title : (jobs.find((j) => j.id === a.job_id)?.title || 'Logistics Role');
+
                 return (
                   <TableRow key={a.id} data-testid={`row-applicant-${a.id}`}>
-                    <TableCell><p className="font-mono font-bold">{label} <SampleTag className="ml-1" /></p><p className="text-xs text-muted-foreground">{detail}</p></TableCell>
-                    <TableCell className="hidden text-sm md:table-cell">{jobs.find((j) => j.id === a.job_id)?.title}</TableCell>
+                    <TableCell><p className="font-mono font-bold">{label} {!isLive && <SampleTag className="ml-1" />}</p><p className="text-xs text-muted-foreground">{detail}</p></TableCell>
+                    <TableCell className="hidden text-sm md:table-cell">{jobTitle}</TableCell>
                     <TableCell className="hidden text-xs md:table-cell">{ago(a.created_at)}</TableCell>
                     <TableCell><StatusPill status={a.status} testId={`status-applicant-${a.id}`} /></TableCell>
                     <TableCell><div className="flex justify-end gap-1">
                       {NEXT[a.status].length === 0 ? <span className="text-xs text-muted-foreground">Final</span> : NEXT[a.status].map((s) => (
-                        <Button key={s} size="sm" variant={s === 'rejected' ? 'ghost' : 'outline'} className="capitalize" onClick={() => { actions.setAppStatus(a.id, s); toast({ title: `Marked ${s}`, description: label }); }} data-testid={`button-${s}-${a.id}`}>{s === 'viewed' ? 'Mark viewed' : s === 'rejected' ? 'Reject' : s}</Button>
+                        <Button key={s} size="sm" variant={s === 'rejected' ? 'ghost' : 'outline'} className="capitalize" onClick={() => handleStatusChange(a.id, s, label)} data-testid={`button-${s}-${a.id}`}>{s === 'viewed' ? 'Mark viewed' : s === 'rejected' ? 'Reject' : s}</Button>
                       ))}
                     </div></TableCell>
                   </TableRow>
