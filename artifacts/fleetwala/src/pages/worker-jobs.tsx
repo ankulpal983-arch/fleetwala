@@ -22,7 +22,9 @@ import { DAILY_LIMIT, profileProgress, usePilot } from '@/lib/store';
 import { DEFAULT_RADIUS_KM, isLiveJob, liveJobs } from '@/lib/rules';
 import { ago, daysLeft, istDate, salaryRange } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { Application } from '@/lib/types';
+import type { Application, Job, JobStatus } from '@/lib/types';
+import { liveMode, useSession, getSupabase } from '@/lib/supabase';
+import { getLiveJobs, applyToLiveJob } from '@/lib/repo';
 
 type Sort = 'newest' | 'salary' | 'expiring';
 
@@ -37,6 +39,8 @@ function useMyApps() {
 
 export function FindJobs() {
   const { state, actions, usageToday, online } = usePilot();
+  const { session } = useSession();
+  const [liveDbJobs, setLiveDbJobs] = useState<Job[] | null>(null);
   const { toast } = useToast();
   const p = state.profile;
   const myApps = useMyApps();
@@ -54,13 +58,23 @@ export function FindJobs() {
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
+    if (liveMode && session) {
+      setLoading(true);
+      getLiveJobs().then((data) => {
+        setLiveDbJobs(data ?? []);
+        setLoading(false);
+      });
+      return () => {};
+    }
     const t = setTimeout(() => setLoading(false), 420);
     return () => clearTimeout(t);
-  }, []);
+  }, [session]);
+
+  const baseJobs = (liveMode && session) ? (liveDbJobs ?? []) : state.jobs;
 
   const jobs = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const list = liveJobs(state.jobs).filter((j) =>
+    const list = liveJobs(baseJobs).filter((j) =>
       j.city === city &&
       (area === 'any' || j.area === area) &&
       (cats.length === 0 || cats.includes(j.category)) &&
@@ -71,7 +85,7 @@ export function FindJobs() {
       sort === 'salary' ? b.max_salary - a.max_salary
         : sort === 'expiring' ? +new Date(a.expires_at) - +new Date(b.expires_at)
           : +new Date(b.created_at) - +new Date(a.created_at));
-  }, [state.jobs, q, city, area, cats, fuelOnly, noLicence, sort]);
+  }, [baseJobs, q, city, area, cats, fuelOnly, noLicence, sort]);
 
   const prog = profileProgress(p);
   const activeFilters = cats.length + (fuelOnly ? 1 : 0) + (noLicence ? 1 : 0) + (area !== 'any' ? 1 : 0);
@@ -246,10 +260,47 @@ export function FindJobs() {
 export function JobDetail() {
   const { id } = useParams<{ id: string }>();
   const { state, actions, usageToday } = usePilot();
+  const { session } = useSession();
+  const [liveJob, setLiveJob] = useState<Job | null>(null);
   const { toast } = useToast();
   const myApps = useMyApps();
   const [confirm, setConfirm] = useState(false);
-  const job = state.jobs.find((j) => j.id === id);
+
+  useEffect(() => {
+    if (liveMode && session && id) {
+      const c = getSupabase();
+      if (c) {
+        c.from('jobs').select('*').eq('id', id).maybeSingle().then(({ data }) => {
+          if (data) {
+            setLiveJob({
+              id: data.id,
+              employer_id: data.employer_id,
+              title: data.title,
+              company: 'Verified Logistics Partner',
+              city: data.city,
+              area: data.area || 'Central',
+              category: data.category as any,
+              min_salary: data.salary_min_inr || 18000,
+              max_salary: data.salary_max_inr || 24000,
+              shift: 'Morning & General',
+              vehicle: data.requires_driving_licence ? 'Two-wheeler with licence' : 'Any vehicle',
+              fuel_allowance: true,
+              licence_required: data.requires_driving_licence || false,
+              experience: '1-3 years',
+              description: data.description,
+              openings: 5,
+              status: (data.state === 'published' ? 'approved' : data.state) as JobStatus,
+              expires_at: data.expires_at || new Date(Date.now() + 30 * 86400000).toISOString(),
+              created_at: data.created_at,
+              moderation_note: data.review_note,
+            });
+          }
+        });
+      }
+    }
+  }, [id, session]);
+
+  const job = (liveMode && session && liveJob) ? liveJob : state.jobs.find((j) => j.id === id);
 
   if (!job || (!isLiveJob(job) && !myApps.has(job.id))) {
     return <EmptyState icon={SearchX} title="Job not available" body="This job may have closed, expired or is not yet approved." action={<Link href="/" className="font-semibold text-primary underline">Back to jobs</Link>} />;
@@ -258,7 +309,24 @@ export function JobDetail() {
   const saved = state.saved.includes(job.id);
   const p = state.profile;
 
-  const doApply = () => {
+  const doApply = async () => {
+    if (liveMode && session) {
+      const res = await applyToLiveJob(job.id);
+      if (res.ok) {
+        actions.apply(job.id);
+        toast({
+          title: 'Application sent',
+          description: res.data?.wasExisting ? 'Already applied previously.' : 'Recorded in staging database via apply_to_job RPC.',
+        });
+      } else {
+        toast({
+          title: 'Could not apply',
+          description: res.error,
+          variant: 'destructive',
+        });
+      }
+      return;
+    }
     const r = actions.apply(job.id);
     toast({ title: r.ok ? 'Application sent' : 'Could not apply', description: r.message, variant: r.ok ? 'default' : 'destructive' });
   };

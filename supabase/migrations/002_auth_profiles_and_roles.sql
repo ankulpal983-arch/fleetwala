@@ -1,6 +1,6 @@
 -- UNEXECUTED — Migration 2 of 15. Auth identity is exclusively Supabase Auth.
 -- Prerequisite: 001. Effect: private account profiles, organization tenancy, admin allowlist.
-create table public.user_accounts (
+create table if not exists public.user_accounts (
   user_id uuid primary key references auth.users(id) on delete restrict,
   account_state public.account_state not null default 'active',
   display_label text,
@@ -9,7 +9,7 @@ create table public.user_accounts (
   constraint user_accounts_label_length check (display_label is null or char_length(display_label) between 1 and 100)
 );
 
-create table public.employers (
+create table if not exists public.employers (
   id uuid primary key default gen_random_uuid(),
   legal_name text not null,
   employer_type public.employer_type not null,
@@ -20,7 +20,7 @@ create table public.employers (
   constraint employers_name_length check (char_length(legal_name) between 2 and 200)
 );
 
-create table public.employer_memberships (
+create table if not exists public.employer_memberships (
   id uuid primary key default gen_random_uuid(),
   employer_id uuid not null references public.employers(id) on delete restrict,
   user_id uuid not null references auth.users(id) on delete restrict,
@@ -32,7 +32,7 @@ create table public.employer_memberships (
 
 -- Deliberately not client-writable. Provision administrators only by a trusted
 -- project owner in the Supabase SQL dashboard after out-of-band identity checks.
-create table public.admin_principals (
+create table if not exists public.admin_principals (
   user_id uuid primary key references auth.users(id) on delete restrict,
   provisioned_by text not null,
   provisioned_at timestamptz not null default now(),

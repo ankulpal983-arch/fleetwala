@@ -7,7 +7,7 @@ create table public.billing_settings (
   candidate_unlock_price_inr integer not null default 10 check (candidate_unlock_price_inr > 0),
   updated_at timestamptz not null default now()
 );
-insert into public.billing_settings(singleton) values (true);
+insert into public.billing_settings(singleton) values (true) on conflict (singleton) do nothing;
 create table public.payment_orders (
   id uuid primary key default gen_random_uuid(),
   employer_id uuid not null references public.employers(id) on delete restrict,

@@ -6,12 +6,54 @@
 
 import { getSupabase, supabaseConfigured } from './supabase';
 import type { AppStatus, Application, Candidate, Job, JobStatus, WorkerProfile } from './types';
-import { anonymizedCandidateProjection } from './rules';
+import type { JobInput } from './store';
 
 export interface RepositoryResult<T = void> {
   ok: boolean;
   data?: T;
   error?: string;
+}
+
+/** Experience band mapping between UI labels and PostgreSQL check constraint values */
+export function toDbExperience(exp?: string): string | null {
+  if (!exp) return null;
+  const lower = exp.toLowerCase();
+  if (lower.includes('fresh')) return 'fresher';
+  if (lower.includes('0–1') || lower.includes('0-1')) return 'fresher';
+  if (lower.includes('1–3') || lower.includes('1-3')) return '1-3';
+  if (lower.includes('3+') || lower.includes('3-5')) return '3-5';
+  if (lower.includes('5')) return '5+';
+  return 'fresher';
+}
+
+export function fromDbExperience(band?: string | null): string {
+  if (!band) return 'Fresher';
+  if (band === 'fresher') return 'Fresher';
+  if (band === '1-3') return '1–3 years';
+  if (band === '3-5' || band === '5+') return '3+ years';
+  return 'Fresher';
+}
+
+/** Vehicle type mapping between UI labels and PostgreSQL check constraint values */
+export function toDbVehicle(v?: string): string | null {
+  if (!v) return null;
+  const lower = v.toLowerCase();
+  if (lower.includes('two') || lower.includes('motorcycle')) return 'motorcycle';
+  if (lower.includes('scooter')) return 'scooter';
+  if (lower.includes('e-bike') || lower.includes('ev')) return 'ev';
+  if (lower.includes('bicycle')) return 'bicycle';
+  if (lower.includes('three')) return 'motorcycle';
+  if (lower.includes('none')) return 'none';
+  return 'none';
+}
+
+export function fromDbVehicle(v?: string | null): string {
+  if (!v) return 'Two-wheeler';
+  if (v === 'motorcycle' || v === 'scooter') return 'Two-wheeler';
+  if (v === 'ev') return 'E-bike';
+  if (v === 'bicycle') return 'Bicycle';
+  if (v === 'none' || v === 'walking') return 'None needed';
+  return 'Two-wheeler';
 }
 
 /** Check if live repository operations can be performed */
@@ -31,7 +73,7 @@ export async function getLiveJobs(): Promise<Job[] | null> {
     .order('created_at', { ascending: false });
 
   if (error || !data) {
-    console.warn('[Repo] getLiveJobs error, falling back:', error?.message);
+    console.warn('[Repo] getLiveJobs error:', error?.message);
     return null;
   }
 
@@ -52,6 +94,44 @@ export async function getLiveJobs(): Promise<Job[] | null> {
     experience: '1-3 years',
     description: j.description,
     openings: 5,
+    status: (j.state === 'published' ? 'approved' : j.state) as JobStatus,
+    expires_at: j.expires_at || new Date(Date.now() + 30 * 86400000).toISOString(),
+    created_at: j.created_at,
+    moderation_note: j.review_note,
+  }));
+}
+
+/** Fetch employer jobs from Supabase */
+export async function getLiveEmployerJobs(): Promise<Job[] | null> {
+  const c = getSupabase();
+  if (!c) return null;
+
+  const { data, error } = await c
+    .from('jobs')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data.map((j) => ({
+    id: j.id,
+    employer_id: j.employer_id,
+    title: j.title,
+    company: 'Ghar-Tak Parcels',
+    city: j.city,
+    area: j.area || 'Central',
+    category: j.category as any,
+    min_salary: j.salary_min_inr || 18000,
+    max_salary: j.salary_max_inr || 24000,
+    shift: 'Day 9–6',
+    vehicle: j.requires_driving_licence ? 'Two-wheeler' : 'None needed',
+    fuel_allowance: true,
+    licence_required: j.requires_driving_licence || false,
+    experience: '1–3 years',
+    description: j.description,
+    openings: 1,
     status: (j.state === 'published' ? 'approved' : j.state) as JobStatus,
     expires_at: j.expires_at || new Date(Date.now() + 30 * 86400000).toISOString(),
     created_at: j.created_at,
@@ -99,8 +179,8 @@ export async function getLiveWorkerProfile(): Promise<WorkerProfile | null> {
     first_name: data.full_name ? data.full_name.split(' ')[0] : '',
     city: data.city || '',
     area: data.address_line || '',
-    experience: data.experience_band || '',
-    vehicle: data.vehicle_type || '',
+    experience: fromDbExperience(data.experience_band),
+    vehicle: fromDbVehicle(data.vehicle_type),
     own_vehicle: data.has_own_vehicle || false,
     available: data.availability !== 'unavailable',
     discoverable: data.discoverable || false,
@@ -120,8 +200,8 @@ export async function saveLiveWorkerProfile(profile: Partial<WorkerProfile>): Pr
     full_name: profile.first_name,
     city: profile.city,
     address_line: profile.area,
-    experience_band: profile.experience,
-    vehicle_type: profile.vehicle,
+    experience_band: toDbExperience(profile.experience),
+    vehicle_type: toDbVehicle(profile.vehicle),
     has_own_vehicle: profile.own_vehicle ?? false,
     discoverable: profile.discoverable ?? false,
     availability: profile.available ? 'immediate' : 'unavailable',
@@ -138,7 +218,7 @@ export async function discoverLiveCandidates(city?: string, category?: string): 
   if (!c) return null;
 
   const { data, error } = await c.rpc('discover_workers', {
-    p_city: city || null,
+    p_city: city && city !== 'all' ? city : null,
     p_category: category || null,
     p_experience: null,
     p_limit: 20,
@@ -150,17 +230,17 @@ export async function discoverLiveCandidates(city?: string, category?: string): 
     return null;
   }
 
-  return data.map((item: any, idx: number) => ({
+  return data.map((item: any) => ({
     id: item.candidate_handle,
     code: `FW-${item.candidate_handle.slice(0, 6).toUpperCase()}`,
     city: item.city || 'Bengaluru',
     area: 'Local Area (Verified)',
-    experience: item.experience_band || '1-3 years',
-    vehicle: item.vehicle_type || 'Motorcycle',
+    experience: fromDbExperience(item.experience_band),
+    vehicle: fromDbVehicle(item.vehicle_type),
     own_vehicle: true,
     available: true,
     languages: ['Hindi', 'English'],
-    skills: ['Local navigation', 'Smartphone app literate', 'Customer delivery'],
+    skills: ['Local navigation', 'Smartphone literate', 'Delivery'],
   }));
 }
 

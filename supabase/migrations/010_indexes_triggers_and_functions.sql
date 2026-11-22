@@ -9,19 +9,23 @@ create index messages_conversation_idx on public.messages(conversation_id, creat
 create index audit_log_created_idx on public.audit_log(created_at desc);
 create index workers_discovery_idx on public.workers(city, category, experience_band) where discoverable and account_state = 'active';
 
-create function public.touch_updated_at() returns trigger
+create or replace function public.touch_updated_at() returns trigger
 language plpgsql set search_path = ''
 as $$ begin new.updated_at := now(); return new; end $$;
+drop trigger if exists workers_touch on public.workers;
 create trigger workers_touch before update on public.workers for each row execute function public.touch_updated_at();
+drop trigger if exists jobs_touch on public.jobs;
 create trigger jobs_touch before update on public.jobs for each row execute function public.touch_updated_at();
+drop trigger if exists accounts_touch on public.user_accounts;
 create trigger accounts_touch before update on public.user_accounts for each row execute function public.touch_updated_at();
 
-create function public.on_auth_user_created() returns trigger
+create or replace function public.on_auth_user_created() returns trigger
 language plpgsql security definer set search_path = ''
 as $$ begin
-  insert into public.user_accounts(user_id) values(new.id);
+  insert into public.user_accounts(user_id) values(new.id) on conflict (user_id) do nothing;
   return new;
 end $$;
+drop trigger if exists fleetwala_auth_user_created on auth.users;
 create trigger fleetwala_auth_user_created after insert on auth.users
 for each row execute function public.on_auth_user_created();
 

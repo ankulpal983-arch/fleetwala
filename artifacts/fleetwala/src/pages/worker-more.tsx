@@ -22,6 +22,8 @@ import { profileProgress, STORAGE_KEY, usePilot } from '@/lib/store';
 import { ago, istStamp } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { AppStatus } from '@/lib/types';
+import { liveMode, useSession } from '@/lib/supabase';
+import { getLiveWorkerProfile, saveLiveWorkerProfile } from '@/lib/repo';
 
 const FLOW: AppStatus[] = ['applied', 'viewed', 'shortlisted', 'hired'];
 
@@ -211,6 +213,7 @@ type ProfileForm = z.infer<typeof profileSchema>;
 
 export function Profile() {
   const { state, actions } = usePilot();
+  const { session } = useSession();
   const { toast } = useToast();
   const form = useForm<ProfileForm>({ resolver: zodResolver(profileSchema), defaultValues: state.profile });
   const city = form.watch('city');
@@ -218,7 +221,37 @@ export function Profile() {
   const prog = profileProgress(live);
   const areas = useMemo(() => CITIES[city] ?? [], [city]);
 
-  const onSubmit = (v: ProfileForm) => {
+  useEffect(() => {
+    if (liveMode && session) {
+      getLiveWorkerProfile().then((p) => {
+        if (p) {
+          form.reset({
+            first_name: p.first_name || '',
+            city: p.city || 'Bengaluru',
+            area: p.area || '',
+            experience: p.experience || '1–3 years',
+            vehicle: p.vehicle || 'Two-wheeler',
+            own_vehicle: p.own_vehicle ?? false,
+            available: p.available ?? true,
+            discoverable: p.discoverable ?? false,
+          });
+        }
+      });
+    }
+  }, [session]);
+
+  const onSubmit = async (v: ProfileForm) => {
+    if (liveMode && session) {
+      const res = await saveLiveWorkerProfile(v);
+      if (res.ok) {
+        actions.updateProfile(v);
+        form.reset(v);
+        toast({ title: 'Profile saved to cloud', description: 'Your profile has been saved securely to Supabase.' });
+      } else {
+        toast({ title: 'Failed to save profile', description: res.error, variant: 'destructive' });
+      }
+      return;
+    }
     actions.updateProfile(v);
     form.reset(v);
     toast({ title: 'Profile saved', description: 'Stored on this device as pilot data.' });

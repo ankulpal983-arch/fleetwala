@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'wouter';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -21,7 +21,9 @@ import { CATEGORIES, CITIES, CITY_NAMES, EXPERIENCE, PILOT_EMPLOYER_ID, SHIFTS, 
 import { usePilot, type JobInput } from '@/lib/store';
 import { ago, istDate, salaryRange } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { AppStatus, Job, JobCategory, JobStatus, TeamMember } from '@/lib/types';
+import type { AppStatus, Candidate, Job, JobCategory, JobStatus, TeamMember } from '@/lib/types';
+import { liveMode, useSession } from '@/lib/supabase';
+import { discoverLiveCandidates } from '@/lib/repo';
 
 const COMPANY = 'Ghar-Tak Parcels';
 
@@ -285,9 +287,21 @@ export function EmployerApplicants() {
 
 export function EmployerCandidates() {
   const { state } = usePilot();
+  const { session } = useSession();
   const { toast } = useToast();
   const [area, setArea] = useState('all');
-  const list = useMemo(() => state.candidates.filter((c) => area === 'all' || c.area === area), [state.candidates, area]);
+  const [liveCandidates, setLiveCandidates] = useState<Candidate[] | null>(null);
+
+  useEffect(() => {
+    if (liveMode && session) {
+      discoverLiveCandidates(area === 'all' ? undefined : area).then((data) => {
+        setLiveCandidates(data ?? []);
+      });
+    }
+  }, [session, area]);
+
+  const candidatesSource = (liveMode && session) ? (liveCandidates ?? []) : state.candidates;
+  const list = useMemo(() => candidatesSource.filter((c) => area === 'all' || c.area === area), [candidatesSource, area]);
   return (
     <div>
       <PageHeader eyebrow={COMPANY} title="Candidate preview" description="Anonymised sample cards of workers who opted in to discovery. Names, phones and photos are never shown."

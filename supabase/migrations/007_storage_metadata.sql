@@ -2,7 +2,8 @@
 -- Bucket remains private. Object keys must be <auth.uid>/<random filename>.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('worker-private-documents', 'worker-private-documents', false, 10485760,
-        array['application/pdf','image/jpeg','image/png']);
+        array['application/pdf','image/jpeg','image/png'])
+on conflict (id) do nothing;
 
 create table public.worker_documents (
   id uuid primary key default gen_random_uuid(),
