@@ -3,7 +3,7 @@ import { Link } from 'wouter';
 import { Mail, CheckCircle2, ArrowLeft, RefreshCw, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Wordmark, PilotChip } from '@/components/shell';
-import { getSupabase } from '@/lib/supabase';
+import { getSupabase, formatAuthError } from '@/lib/supabase';
 
 export function VerifyEmailPage() {
   const [email, setEmail] = useState('');
@@ -43,7 +43,7 @@ export function VerifyEmailPage() {
         email: email.trim(),
       });
       if (error) {
-        setResendStatus(error.message);
+        setResendStatus(formatAuthError(error));
       } else {
         setResendStatus('Confirmation email resent! Please check your inbox.');
         setCooldown(60);

@@ -168,9 +168,16 @@ export function SignupPage() {
             </div>
 
             {errorMsg && (
-              <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive" role="alert">
-                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                <span>{errorMsg}</span>
+              <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive space-y-1.5" role="alert">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">{errorMsg}</span>
+                </div>
+                {errorMsg.toLowerCase().includes('rate limit') && (
+                  <p className="text-[11px] text-muted-foreground pl-6.5 leading-relaxed">
+                    <strong>Tip:</strong> If you are testing pre-production accounts, wait for the rate limit window to reset, use Google sign-in below, or configure a Custom SMTP provider (such as Resend or Brevo) in your Supabase project dashboard.
+                  </p>
+                )}
               </div>
             )}
 

@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { liveGate } from './rules';
 import { resolveUserRoleStatus, toDbExperience, fromDbExperience, toDbVehicle, fromDbVehicle } from './repo';
+import { formatAuthError } from './supabase';
 
 describe('White Screen & Runtime Resilience Regression Tests', () => {
   it('1. Handles missing Supabase configuration without crashing', () => {
@@ -78,5 +79,31 @@ describe('White Screen & Runtime Resilience Regression Tests', () => {
     const html = fs.readFileSync(path.resolve('index.html'), 'utf-8');
     assert.ok(html.includes('id="fw-initial-loader"'), 'index.html must include branded pre-hydration loader');
     assert.ok(html.includes("window.addEventListener('error'"), 'index.html must include window error listener');
+  });
+
+  it('8. formatAuthError maps rate limits and GoTrue auth codes into actionable messages', () => {
+    // 429 / over_email_send_rate_limit
+    const rateLimit1 = formatAuthError({ code: 'over_email_send_rate_limit', message: 'email rate limit exceeded', status: 429 });
+    assert.ok(rateLimit1.includes('Email confirmation rate limit reached'));
+    assert.ok(rateLimit1.includes('Custom SMTP'));
+
+    const rateLimit2 = formatAuthError('email rate limit exceeded');
+    assert.ok(rateLimit2.includes('Email confirmation rate limit reached'));
+
+    // Provider disabled
+    const providerErr = formatAuthError({ code: 'provider_disabled', message: 'Unsupported provider: provider is not enabled' });
+    assert.ok(providerErr.includes('not yet enabled in your Supabase project'));
+
+    // User already registered
+    const userExists = formatAuthError({ message: 'User already registered' });
+    assert.ok(userExists.includes('already exists. Please sign in instead.'));
+
+    // Email not confirmed
+    const unconfirmed = formatAuthError({ message: 'Email not confirmed' });
+    assert.ok(unconfirmed.includes('Please confirm your email address'));
+
+    // Invalid email domain
+    const badDomain = formatAuthError({ code: 'email_address_invalid', message: 'Email address "x@y.test" is invalid' });
+    assert.ok(badDomain.includes('standard domain required'));
   });
 });

@@ -64,6 +64,72 @@ const notConfigured: AuthResult = {
   error: 'Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.',
 };
 
+/**
+ * Maps Supabase GoTrue raw error codes and messages into human-friendly, actionable feedback.
+ * Specifically prevents cryptic rate limit crashes (e.g. over_email_send_rate_limit).
+ */
+export function formatAuthError(error: { code?: string; message: string; status?: number } | string | null | undefined): string {
+  if (!error) return 'An unexpected error occurred. Please try again.';
+  const rawMsg = typeof error === 'string' ? error : error.message || '';
+  const code = (typeof error === 'object' && error?.code ? error.code : '').toLowerCase();
+  const status = typeof error === 'object' && error?.status ? error.status : 0;
+  const lowerMsg = rawMsg.toLowerCase();
+
+  // Rate limiting (HTTP 429 / over_email_send_rate_limit)
+  if (
+    code === 'over_email_send_rate_limit' ||
+    lowerMsg.includes('over_email_send_rate_limit') ||
+    lowerMsg.includes('email rate limit') ||
+    lowerMsg.includes('rate limit exceeded') ||
+    status === 429
+  ) {
+    return 'Email confirmation rate limit reached (Supabase default permits 3–4 confirmation emails per hour). Please wait a few minutes before trying again, or configure Custom SMTP in your Supabase project dashboard.';
+  }
+
+  // OAuth provider not enabled
+  if (
+    code === 'provider_disabled' ||
+    lowerMsg.includes('provider is not enabled') ||
+    lowerMsg.includes('unsupported provider')
+  ) {
+    return 'This sign-in provider is not yet enabled in your Supabase project. Please use email registration or configure credentials in the Supabase dashboard.';
+  }
+
+  // User already exists
+  if (
+    lowerMsg.includes('user already registered') ||
+    code === 'user_already_exists'
+  ) {
+    return 'An account with this email address already exists. Please sign in instead.';
+  }
+
+  // Invalid login credentials
+  if (
+    lowerMsg.includes('invalid login credentials') ||
+    code === 'invalid_credentials'
+  ) {
+    return 'Invalid email or password. Please verify your credentials and try again.';
+  }
+
+  // Email not confirmed
+  if (
+    lowerMsg.includes('email not confirmed') ||
+    code === 'email_not_confirmed'
+  ) {
+    return 'Please confirm your email address before signing in. Check your inbox and spam folder for the activation link.';
+  }
+
+  // Email format rejected by GoTrue
+  if (
+    code === 'email_address_invalid' ||
+    (lowerMsg.includes('email address') && lowerMsg.includes('invalid'))
+  ) {
+    return 'Please enter a valid, deliverable email address (standard domain required).';
+  }
+
+  return rawMsg || 'Authentication request failed. Please try again.';
+}
+
 export { INDIAN_MOBILE, normalizeIndianPhone } from './rules';
 import { normalizeIndianPhone } from './rules';
 
@@ -84,7 +150,7 @@ export async function signInWithEmail(email: string, password: string): Promise<
   const c = getSupabase();
   if (!c) return notConfigured;
   const { data, error } = await c.auth.signInWithPassword({ email, password });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: formatAuthError(error) };
   return { ok: true, user: data.user, session: data.session };
 }
 
@@ -109,7 +175,7 @@ export async function signUpWithEmail(
       emailRedirectTo: redirect,
     },
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: formatAuthError(error) };
   return { ok: true, user: data.user ?? undefined, session: data.session ?? undefined };
 }
 
@@ -121,7 +187,7 @@ export async function resetPasswordForEmail(email: string): Promise<AuthResult> 
   const { error } = await c.auth.resetPasswordForEmail(email, {
     redirectTo: redirect,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: formatAuthError(error) };
   return { ok: true };
 }
 
@@ -130,7 +196,7 @@ export async function updateUserPassword(newPassword: string): Promise<AuthResul
   const c = getSupabase();
   if (!c) return notConfigured;
   const { data, error } = await c.auth.updateUser({ password: newPassword });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: formatAuthError(error) };
   return { ok: true, user: data.user };
 }
 
@@ -149,7 +215,7 @@ export async function signInWithOAuth(provider: 'google' | 'github', targetRole:
       },
     },
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: formatAuthError(error) };
   return { ok: true };
 }
 
@@ -164,7 +230,7 @@ export async function sendPhoneOtp(phone: string): Promise<AuthResult> {
   const e164 = normalizeIndianPhone(phone);
   if (!e164) return { ok: false, error: 'Enter a valid 10-digit Indian mobile number starting with 6, 7, 8 or 9.' };
   const { error } = await c.auth.signInWithOtp({ phone: e164 });
-  return error ? { ok: false, error: error.message } : { ok: true };
+  return error ? { ok: false, error: formatAuthError(error) } : { ok: true };
 }
 
 export async function verifyPhoneOtp(phone: string, token: string): Promise<AuthResult> {
@@ -174,7 +240,7 @@ export async function verifyPhoneOtp(phone: string, token: string): Promise<Auth
   if (!e164) return { ok: false, error: 'Phone number is invalid.' };
   if (!/^\d{6}$/.test(token)) return { ok: false, error: 'Enter the 6-digit code sent by SMS.' };
   const { error } = await c.auth.verifyOtp({ phone: e164, token, type: 'sms' });
-  return error ? { ok: false, error: error.message } : { ok: true };
+  return error ? { ok: false, error: formatAuthError(error) } : { ok: true };
 }
 
 /** Email Magic Link fallback */
@@ -183,7 +249,7 @@ export async function sendEmailMagicLink(email: string): Promise<AuthResult> {
   if (!c) return notConfigured;
   const redirect = getRedirectUrl('/employer');
   const { error } = await c.auth.signInWithOtp({ email, options: { emailRedirectTo: redirect } });
-  return error ? { ok: false, error: error.message } : { ok: true };
+  return error ? { ok: false, error: formatAuthError(error) } : { ok: true };
 }
 
 /** Sign Out */
