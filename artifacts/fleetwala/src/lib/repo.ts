@@ -278,3 +278,114 @@ export async function checkIsLiveAdmin(): Promise<boolean> {
   if (error) return false;
   return Boolean(data);
 }
+
+/** Register a new employer organization via secure RPC (cannot self-verify) */
+export async function registerLiveEmployer(
+  legalName: string,
+  employerType: 'company' | 'vendor_dsp' | 'recruitment_agency'
+): Promise<RepositoryResult<{ employerId: string }>> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { data, error } = await c.rpc('register_employer', {
+    p_legal_name: legalName.trim(),
+    p_employer_type: employerType,
+  });
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, data: { employerId: data } };
+}
+
+/** Fetch active employer organization for the current user */
+export async function getLiveEmployerOrg(): Promise<{ id: string; legal_name: string; employer_type: string; verification_state: string } | null> {
+  const c = getSupabase();
+  if (!c) return null;
+
+  const { data: { user } } = await c.auth.getUser();
+  if (!user) return null;
+
+  const { data: memberships, error } = await c
+    .from('employer_memberships')
+    .select('employer_id, role, state')
+    .eq('user_id', user.id)
+    .eq('state', 'active')
+    .limit(1);
+
+  if (error || !memberships || memberships.length === 0) return null;
+
+  const { data: employer } = await c
+    .from('employers')
+    .select('id, legal_name, employer_type, verification_state')
+    .eq('id', memberships[0].employer_id)
+    .single();
+
+  return employer ?? null;
+}
+
+export interface UserRoleStatus {
+  role: 'admin' | 'employer' | 'worker';
+  onboarded: boolean;
+  isAdmin: boolean;
+  isEmployer: boolean;
+  isWorker: boolean;
+  workerProfile?: WorkerProfile | null;
+  employerOrg?: { id: string; legal_name: string; employer_type: string; verification_state: string } | null;
+}
+
+/** Resolves trusted database role and onboarding status without trusting frontend role */
+export async function resolveUserRoleStatus(): Promise<UserRoleStatus> {
+  const c = getSupabase();
+  if (!c) {
+    return { role: 'worker', onboarded: false, isAdmin: false, isEmployer: false, isWorker: true };
+  }
+
+  const { data: { user } } = await c.auth.getUser();
+  if (!user) {
+    return { role: 'worker', onboarded: false, isAdmin: false, isEmployer: false, isWorker: true };
+  }
+
+  // 1. Check if user is allowlisted admin
+  const { data: isAdminData } = await c.rpc('is_admin');
+  if (Boolean(isAdminData)) {
+    return { role: 'admin', onboarded: true, isAdmin: true, isEmployer: false, isWorker: false };
+  }
+
+  // 2. Check if user has an active employer membership
+  const employerOrg = await getLiveEmployerOrg();
+  if (employerOrg) {
+    return {
+      role: 'employer',
+      onboarded: true,
+      isAdmin: false,
+      isEmployer: true,
+      isWorker: false,
+      employerOrg,
+    };
+  }
+
+  // 3. Check if user metadata requested employer onboarding
+  const metaRole = (user.user_metadata?.role as 'worker' | 'employer') || 'worker';
+  if (metaRole === 'employer') {
+    return {
+      role: 'employer',
+      onboarded: false,
+      isAdmin: false,
+      isEmployer: true,
+      isWorker: false,
+      employerOrg: null,
+    };
+  }
+
+  // 4. Worker role
+  const workerProfile = await getLiveWorkerProfile();
+  const workerOnboarded = Boolean(workerProfile && workerProfile.first_name);
+
+  return {
+    role: 'worker',
+    onboarded: workerOnboarded,
+    isAdmin: false,
+    isEmployer: false,
+    isWorker: true,
+    workerProfile,
+  };
+}

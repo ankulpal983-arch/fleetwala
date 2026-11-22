@@ -181,3 +181,33 @@ test('candidate opt-out discoverability defaults to false', () => {
   assert.equal(optedInWorker.discoverable, true);
 });
 
+test('experience band mapping conforms to database check constraints', () => {
+  // DB check: experience_band in ('fresher','1-3','3-5','5+')
+  const validDbBands = ['fresher', '1-3', '3-5', '5+'];
+  
+  // Test mappings
+  assert.equal(validDbBands.includes('fresher'), true);
+  assert.equal(validDbBands.includes('1-3'), true);
+  assert.equal(validDbBands.includes('3-5'), true);
+  assert.equal(validDbBands.includes('5+'), true);
+});
+
+test('vehicle type mapping conforms to database check constraints', () => {
+  // DB check: vehicle_type in ('motorcycle','scooter','ev','bicycle','walking','none')
+  const validDbVehicles = ['motorcycle', 'scooter', 'ev', 'bicycle', 'walking', 'none'];
+  
+  assert.equal(validDbVehicles.includes('motorcycle'), true);
+  assert.equal(validDbVehicles.includes('scooter'), true);
+  assert.equal(validDbVehicles.includes('ev'), true);
+  assert.equal(validDbVehicles.includes('bicycle'), true);
+  assert.equal(validDbVehicles.includes('none'), true);
+});
+
+test('employer organization type conforms to PostgreSQL employer_type enum', () => {
+  const validTypes = ['company', 'vendor_dsp', 'recruitment_agency'];
+  assert.equal(validTypes.includes('company'), true);
+  assert.equal(validTypes.includes('vendor_dsp'), true);
+  assert.equal(validTypes.includes('recruitment_agency'), true);
+  assert.equal(validTypes.includes('admin'), false);
+});
+

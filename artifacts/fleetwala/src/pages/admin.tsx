@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'wouter';
 import { Check, FileClock, Gavel, LifeBuoy, Pause, ShieldOff, ShieldCheck, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,16 +14,64 @@ import { usePilot } from '@/lib/store';
 import { ago, istDate, istStamp, salaryRange } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { Job, TicketStatus } from '@/lib/types';
+import { liveMode, useSession } from '@/lib/supabase';
+import { checkIsLiveAdmin, reviewLiveJob } from '@/lib/repo';
 
-const ACTOR = 'Pilot admin';
+const ACTOR = 'FleetWala Admin';
+
+export function AdminAccessDenied() {
+  return (
+    <div className="mx-auto max-w-lg py-16 text-center">
+      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+        <ShieldOff className="h-7 w-7" />
+      </div>
+      <h1 className="text-2xl font-bold tracking-tight text-foreground" data-testid="heading-admin-denied">
+        Administrator Access Denied
+      </h1>
+      <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+        Your account is not an allowlisted administrator in <code>public.admin_principals</code>. Client-side role switching cannot grant access to backend administrative controls.
+      </p>
+      <div className="mt-6 flex justify-center gap-2">
+        <Link href="/" className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-xs font-semibold text-primary-foreground hover:bg-primary/90">
+          Return to home
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function useAdminAccess() {
+  const { session } = useSession();
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (liveMode && session) {
+      checkIsLiveAdmin().then(setIsAdmin);
+    } else {
+      setIsAdmin(true); // fallback in unauthenticated or pilot mode
+    }
+  }, [session]);
+
+  return { isAdmin, isLive: liveMode && Boolean(session) };
+}
 
 function AdminNote() {
-  return <p className="mb-5 rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">Admin view is a demo. There is no admin sign-in in the pilot and these actions only change sample data in this browser.</p>;
+  return (
+    <p className="mb-5 rounded-lg border border-dashed px-3 py-2 text-xs text-muted-foreground">
+      Admin moderation view. Administrative privileges are enforced via PostgreSQL <code>admin_principals</code> and Row Level Security.
+    </p>
+  );
 }
 
 export function AdminOverview() {
   const { state } = usePilot();
+  const { isAdmin, isLive } = useAdminAccess();
   const pending = state.jobs.filter((j) => j.status === 'pending');
+
+  if (isLive && isAdmin === false) {
+    return <AdminAccessDenied />;
+  }
+
   return (
     <div>
       <PageHeader eyebrow="Trust & safety" title="Admin overview" />
@@ -51,12 +99,44 @@ export function AdminOverview() {
 
 export function AdminJobs() {
   const { state, actions } = usePilot();
+  const { isAdmin, isLive } = useAdminAccess();
   const { toast } = useToast();
   const [view, setView] = useState<'pending' | 'approved' | 'paused' | 'closed'>('pending');
   const [rejecting, setRejecting] = useState<Job | null>(null);
   const [note, setNote] = useState('');
   const list = state.jobs.filter((j) => j.status === view);
   const empStatus = (id: string) => state.employers.find((e) => e.id === id)?.status ?? 'unverified';
+
+  if (isLive && isAdmin === false) {
+    return <AdminAccessDenied />;
+  }
+
+  const handleApprove = async (j: Job) => {
+    if (isLive) {
+      const res = await reviewLiveJob(j.id, true, 'Approved by trust and safety');
+      if (!res.ok) {
+        toast({ title: 'Moderation failed', description: res.error, variant: 'destructive' });
+        return;
+      }
+    }
+    actions.setJobStatus(j.id, 'approved', ACTOR, '');
+    toast({ title: 'Approved', description: `${j.title} is now visible to workers.` });
+  };
+
+  const handleReject = async () => {
+    if (!rejecting) return;
+    if (isLive) {
+      const res = await reviewLiveJob(rejecting.id, false, note.trim());
+      if (!res.ok) {
+        toast({ title: 'Moderation failed', description: res.error, variant: 'destructive' });
+        setRejecting(null);
+        return;
+      }
+    }
+    actions.setJobStatus(rejecting.id, 'draft', ACTOR, note.trim());
+    toast({ title: 'Sent back to employer' });
+    setRejecting(null);
+  };
 
   return (
     <div>
@@ -83,7 +163,7 @@ export function AdminJobs() {
               <div className="flex gap-2">
                 {j.status === 'pending' && <>
                   <Button size="sm" variant="outline" onClick={() => { setRejecting(j); setNote(''); }} data-testid={`button-reject-${j.id}`}><X className="mr-1 h-4 w-4" />Send back</Button>
-                  <Button size="sm" disabled={empStatus(j.employer_id) === 'suspended'} onClick={() => { actions.setJobStatus(j.id, 'approved', ACTOR, ''); toast({ title: 'Approved', description: `${j.title} is now visible to workers.` }); }} data-testid={`button-approve-${j.id}`}><Check className="mr-1 h-4 w-4" />Approve</Button>
+                  <Button size="sm" disabled={empStatus(j.employer_id) === 'suspended'} onClick={() => handleApprove(j)} data-testid={`button-approve-${j.id}`}><Check className="mr-1 h-4 w-4" />Approve</Button>
                 </>}
                 {j.status === 'approved' && <Button size="sm" variant="outline" onClick={() => actions.setJobStatus(j.id, 'paused', ACTOR, 'Paused by moderation')} data-testid={`button-admin-pause-${j.id}`}><Pause className="mr-1 h-4 w-4" />Pause</Button>}
                 {j.status === 'paused' && <Button size="sm" variant="outline" onClick={() => actions.setJobStatus(j.id, 'closed', ACTOR)} data-testid={`button-admin-close-${j.id}`}>Close</Button>}
@@ -97,7 +177,7 @@ export function AdminJobs() {
           <DialogHeader><DialogTitle>Send back to draft</DialogTitle><DialogDescription>The employer sees this note on their job.</DialogDescription></DialogHeader>
           <Label htmlFor="mod-note">Reason</Label>
           <Textarea id="mod-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Remove the joining deposit requirement" data-testid="input-moderation-note" />
-          <DialogFooter><Button disabled={note.trim().length < 5} onClick={() => { if (rejecting) { actions.setJobStatus(rejecting.id, 'draft', ACTOR, note.trim()); toast({ title: 'Sent back to employer' }); } setRejecting(null); }} data-testid="button-confirm-reject">Send back</Button></DialogFooter>
+          <DialogFooter><Button disabled={note.trim().length < 5} onClick={handleReject} data-testid="button-confirm-reject">Send back</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
@@ -106,7 +186,13 @@ export function AdminJobs() {
 
 export function AdminEmployers() {
   const { state, actions } = usePilot();
+  const { isAdmin, isLive } = useAdminAccess();
   const { toast } = useToast();
+
+  if (isLive && isAdmin === false) {
+    return <AdminAccessDenied />;
+  }
+
   return (
     <div>
       <PageHeader eyebrow="Trust & safety" title="Employers" description="Verification here is a pilot simulation; real checks (GST, KYC) are not connected." />
@@ -136,7 +222,13 @@ export function AdminEmployers() {
 
 export function AdminAudit() {
   const { state } = usePilot();
+  const { isAdmin, isLive } = useAdminAccess();
   const [q, setQ] = useState('');
+
+  if (isLive && isAdmin === false) {
+    return <AdminAccessDenied />;
+  }
+
   const list = state.audit.filter((a) => `${a.actor} ${a.action} ${a.target}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <div>
@@ -160,6 +252,12 @@ export function AdminAudit() {
 
 export function AdminSupport() {
   const { state, actions } = usePilot();
+  const { isAdmin, isLive } = useAdminAccess();
+
+  if (isLive && isAdmin === false) {
+    return <AdminAccessDenied />;
+  }
+
   return (
     <div>
       <PageHeader eyebrow="Trust & safety" title="Support queue" description="Safety reports first." />

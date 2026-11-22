@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { liveGate } from './rules';
 import { createClient, type Session, type SupabaseClient, type User } from '@supabase/supabase-js';
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+const metaEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined;
+const url = (metaEnv?.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL) as string | undefined;
+const key = (metaEnv?.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string | undefined;
 
 export const supabaseConfigured = Boolean(url && key && !url.includes('YOUR-STAGING-PROJECT'));
-export const liveRequested = import.meta.env.VITE_ENABLE_LIVE === 'true';
+export const liveRequested = (metaEnv?.VITE_ENABLE_LIVE || process.env.VITE_ENABLE_LIVE) === 'true';
 /** Live mode only when explicitly enabled AND Supabase is configured. */
 export const liveMode = liveRequested && supabaseConfigured;
 /** Live portal data gate: fail-closed if requested without credentials. */
@@ -40,7 +41,7 @@ import { normalizeIndianPhone } from './rules';
 /** Get the configured redirect origin for OAuth and email confirmations */
 export function getRedirectUrl(path: string = '/'): string {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+  const base = ((metaEnv?.BASE_URL as string | undefined) || '/').replace(/\/$/, '');
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   return `${origin}${base}${cleanPath}`;
 }

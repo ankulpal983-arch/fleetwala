@@ -12,12 +12,31 @@ import { FindJobs, JobDetail, SavedJobs } from '@/pages/worker-jobs';
 import { Applications, Messages, Notifications, Profile, SettingsPage, Support } from '@/pages/worker-more';
 import { EmployerApplicants, EmployerBilling, EmployerCandidates, EmployerJobs, EmployerOverview, EmployerTeam } from '@/pages/employer';
 import { AdminAudit, AdminEmployers, AdminJobs, AdminOverview, AdminSupport } from '@/pages/admin';
-import { Legal, LiveSetup, Login, Welcome } from '@/pages/public';
+import { Legal, LiveSetup, Welcome } from '@/pages/public';
+import { LoginPage } from '@/pages/auth/login';
+import { SignupPage } from '@/pages/auth/signup';
+import { VerifyEmailPage } from '@/pages/auth/verify-email';
+import { ForgotPasswordPage } from '@/pages/auth/forgot-password';
+import { ResetPasswordPage } from '@/pages/auth/reset-password';
+import { AuthCallbackPage } from '@/pages/auth/callback';
+import { WorkerOnboardingPage } from '@/pages/onboarding/worker-onboarding';
+import { EmployerOnboardingPage } from '@/pages/onboarding/employer-onboarding';
 
 const queryClient = new QueryClient();
 
 function isPublic(loc: string) {
-  return loc === '/welcome' || loc === '/login' || loc.startsWith('/legal');
+  return (
+    loc === '/welcome' ||
+    loc === '/login' ||
+    loc === '/signup' ||
+    loc === '/verify-email' ||
+    loc === '/forgot-password' ||
+    loc === '/reset-password' ||
+    loc === '/auth/callback' ||
+    loc === '/onboarding/worker' ||
+    loc === '/onboarding/employer' ||
+    loc.startsWith('/legal')
+  );
 }
 
 function Router() {
@@ -33,29 +52,43 @@ function Router() {
       '/admin': 'Trust overview', '/admin/jobs': 'Job moderation',
       '/admin/employers': 'Employer verification', '/admin/audit': 'Audit log',
       '/admin/support': 'Support queue', '/welcome': 'Local logistics hiring',
-      '/login': 'Sign in', '/legal/terms': 'Draft terms', '/legal/privacy': 'Draft privacy policy',
+      '/login': 'Sign in', '/signup': 'Create account', '/verify-email': 'Verify your email',
+      '/forgot-password': 'Reset password', '/reset-password': 'Set new password',
+      '/auth/callback': 'Signing in', '/onboarding/worker': 'Worker setup',
+      '/onboarding/employer': 'Employer setup', '/legal/terms': 'Terms of service',
+      '/legal/privacy': 'Privacy policy',
     };
-    const title = `${titles[loc] ?? (loc.startsWith('/jobs/') ? 'Job details' : 'Page not found')} · FleetWala pilot`;
+    const title = `${titles[loc] ?? (loc.startsWith('/jobs/') ? 'Job details' : 'Page not found')} · FleetWala`;
     document.title = title;
     document.querySelector('meta[property="og:title"]')?.setAttribute('content', title);
     document.querySelector('meta[name="description"]')?.setAttribute(
-      'content', `${titles[loc] ?? 'Local logistics hiring'} in the FleetWala sample-data pilot. No live recruitment or payments.`,
+      'content', `${titles[loc] ?? 'Local logistics hiring'} on FleetWala. India's verified logistics hiring network.`,
     );
   }, [loc]);
+
   if (isPublic(loc)) {
     return (
       <RoutedErrorBoundary>
         <Switch>
           <Route path="/welcome" component={Welcome} />
-          <Route path="/login" component={Login} />
+          <Route path="/login" component={LoginPage} />
+          <Route path="/signup" component={SignupPage} />
+          <Route path="/verify-email" component={VerifyEmailPage} />
+          <Route path="/forgot-password" component={ForgotPasswordPage} />
+          <Route path="/reset-password" component={ResetPasswordPage} />
+          <Route path="/auth/callback" component={AuthCallbackPage} />
+          <Route path="/onboarding/worker" component={WorkerOnboardingPage} />
+          <Route path="/onboarding/employer" component={EmployerOnboardingPage} />
           <Route path="/legal/:doc" component={Legal} />
           <Route component={NotFound} />
         </Switch>
       </RoutedErrorBoundary>
     );
   }
+
   // Fail closed: live mode requested but live data or config is not ready.
   if (gate.blocked) return <LiveSetup />;
+
   return (
     <Shell>
       <RoutedErrorBoundary>
