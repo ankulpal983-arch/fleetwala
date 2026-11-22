@@ -58,19 +58,31 @@ export function FindJobs() {
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
-    if (liveMode && session) {
+    let active = true;
+    if (liveMode) {
       setLoading(true);
-      getLiveJobs().then((data) => {
-        setLiveDbJobs(data ?? []);
-        setLoading(false);
-      });
-      return () => {};
+      getLiveJobs()
+        .then((data) => {
+          if (!active) return;
+          setLiveDbJobs(data ?? []);
+          setLoading(false);
+        })
+        .catch(() => {
+          if (!active) return;
+          setLoading(false);
+        });
+      return () => { active = false; };
     }
-    const t = setTimeout(() => setLoading(false), 420);
-    return () => clearTimeout(t);
+    const t = setTimeout(() => {
+      if (active) setLoading(false);
+    }, 250);
+    return () => {
+      active = false;
+      clearTimeout(t);
+    };
   }, [session]);
 
-  const baseJobs = (liveMode && session) ? (liveDbJobs ?? []) : state.jobs;
+  const baseJobs = (liveMode && liveDbJobs && liveDbJobs.length > 0) ? liveDbJobs : state.jobs;
 
   const jobs = useMemo(() => {
     const term = q.trim().toLowerCase();

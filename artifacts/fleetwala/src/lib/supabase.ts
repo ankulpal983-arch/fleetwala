@@ -2,12 +2,41 @@ import { useEffect, useState } from 'react';
 import { liveGate } from './rules';
 import { createClient, type Session, type SupabaseClient, type User } from '@supabase/supabase-js';
 
-const metaEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env : undefined;
-const url = (metaEnv?.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL) as string | undefined;
-const key = (metaEnv?.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY) as string | undefined;
+// Isomorphic environment resolution safe for both browser (Vite import.meta.env) and Node.js test runners (process.env)
+const getEnvVar = (name: 'VITE_SUPABASE_URL' | 'VITE_SUPABASE_PUBLISHABLE_KEY' | 'VITE_ENABLE_LIVE' | 'BASE_URL'): string | undefined => {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      const val = import.meta.env[name];
+      if (typeof val === 'string' && val.trim().length > 0) return val.trim();
+    }
+  } catch {}
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      const val = process.env[name];
+      if (typeof val === 'string' && val.trim().length > 0) return val.trim();
+    }
+  } catch {}
+  return undefined;
+};
+
+// Direct literals ensure Vite's AST static replacement plugin can substitute values in client builds
+const rawUrl =
+  (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_URL : undefined) ||
+  getEnvVar('VITE_SUPABASE_URL');
+
+const rawKey =
+  (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY : undefined) ||
+  getEnvVar('VITE_SUPABASE_PUBLISHABLE_KEY');
+
+const rawLive =
+  (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_ENABLE_LIVE : undefined) ||
+  getEnvVar('VITE_ENABLE_LIVE');
+
+const url = rawUrl;
+const key = rawKey;
 
 export const supabaseConfigured = Boolean(url && key && !url.includes('YOUR-STAGING-PROJECT'));
-export const liveRequested = (metaEnv?.VITE_ENABLE_LIVE || process.env.VITE_ENABLE_LIVE) === 'true';
+export const liveRequested = rawLive === 'true';
 /** Live mode only when explicitly enabled AND Supabase is configured. */
 export const liveMode = liveRequested && supabaseConfigured;
 /** Live portal data gate: fail-closed if requested without credentials. */
@@ -41,7 +70,11 @@ import { normalizeIndianPhone } from './rules';
 /** Get the configured redirect origin for OAuth and email confirmations */
 export function getRedirectUrl(path: string = '/'): string {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const base = ((metaEnv?.BASE_URL as string | undefined) || '/').replace(/\/$/, '');
+  const rawBase =
+    (typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.BASE_URL : undefined) ||
+    getEnvVar('BASE_URL') ||
+    '/';
+  const base = rawBase.replace(/\/$/, '');
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   return `${origin}${base}${cleanPath}`;
 }
@@ -161,26 +194,71 @@ export async function signOut(): Promise<AuthResult> {
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 
-/** Session Hook */
+export type AuthStatus = 'initializing' | 'authenticated' | 'unauthenticated' | 'error';
+
+/** Session Hook with resilient state machine & bounded timeout */
 export function useSession() {
   const [session, setSession] = useState<Session | null>(null);
+  const [status, setStatus] = useState<AuthStatus>(supabaseConfigured ? 'initializing' : 'unauthenticated');
   const [ready, setReady] = useState(!supabaseConfigured);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     const c = getSupabase();
     if (!c) {
       setReady(true);
+      setStatus('unauthenticated');
       return;
     }
-    c.auth.getSession().then(({ data }) => {
-      setSession(data.session);
+
+    let isMounted = true;
+
+    // Timeout guard: never hang on infinite loading screen
+    const timeoutTimer = setTimeout(() => {
+      if (isMounted) {
+        setReady(true);
+        setStatus('unauthenticated');
+      }
+    }, 4000);
+
+    c.auth.getSession()
+      .then(({ data, error }) => {
+        if (!isMounted) return;
+        clearTimeout(timeoutTimer);
+        if (error) {
+          console.warn('[Auth] getSession returned error:', error.message);
+          setAuthError(error.message);
+          setSession(null);
+          setStatus('error');
+        } else {
+          setSession(data.session);
+          setStatus(data.session ? 'authenticated' : 'unauthenticated');
+        }
+        setReady(true);
+      })
+      .catch((err) => {
+        if (!isMounted) return;
+        clearTimeout(timeoutTimer);
+        console.warn('[Auth] getSession threw exception:', err);
+        setAuthError(err instanceof Error ? err.message : String(err));
+        setSession(null);
+        setStatus('unauthenticated');
+        setReady(true);
+      });
+
+    const { data: authSub } = c.auth.onAuthStateChange((_e, s) => {
+      if (!isMounted) return;
+      setSession(s);
+      setStatus(s ? 'authenticated' : 'unauthenticated');
       setReady(true);
     });
-    const { data } = c.auth.onAuthStateChange((_e, s) => {
-      setSession(s);
-    });
-    return () => data.subscription.unsubscribe();
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutTimer);
+      authSub?.subscription?.unsubscribe();
+    };
   }, []);
 
-  return { session, ready, user: session?.user ?? null };
+  return { session, ready, status, authError, user: session?.user ?? null };
 }

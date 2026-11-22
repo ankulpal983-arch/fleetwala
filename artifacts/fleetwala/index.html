@@ -18,7 +18,39 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="fw-initial-loader" style="min-height: 100vh; display: flex; align-items: center; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc;">
+        <div style="text-align: center; max-width: 360px; padding: 24px;">
+          <div style="display: inline-flex; align-items: center; justify-content: center; margin-bottom: 20px;">
+            <span style="display: flex; height: 36px; border-radius: 6px; overflow: hidden; border: 2px solid #334155; background: #1e293b;">
+              <span style="width: 6px; background: #f97316;"></span>
+              <span style="display: flex; align-items: center; padding: 0 8px; font-family: monospace; font-size: 13px; font-weight: bold; color: #f8fafc;">FW</span>
+            </span>
+            <span style="margin-left: 8px; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; color: #f8fafc;">
+              Fleet<span style="color: #f97316;">Wala</span>
+            </span>
+          </div>
+          <div style="margin: 0 auto 16px; width: 32px; height: 32px; border: 3px solid #334155; border-top-color: #f97316; border-radius: 50%; animation: fw-spin 0.75s linear infinite;"></div>
+          <p style="font-size: 13px; color: #94a3b8; margin: 0;">Starting verified hiring workspace...</p>
+        </div>
+      </div>
+      <style>
+        @keyframes fw-spin { to { transform: rotate(360deg); } }
+      </style>
+      <script>
+        window.addEventListener('error', function(e) {
+          var loader = document.getElementById('fw-initial-loader');
+          if (loader) {
+            loader.innerHTML = '<div style="background: #1e293b; border: 1px solid #dc2626; border-radius: 10px; padding: 24px; max-width: 440px; margin: 0 auto; text-align: center; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);">' +
+              '<h3 style="color: #ef4444; font-size: 16px; font-weight: 700; margin: 0 0 8px;">Application Launch Error</h3>' +
+              '<p style="color: #cbd5e1; font-size: 13px; line-height: 1.5; margin: 0 0 16px;">We could not launch the interface. Please refresh the page.</p>' +
+              '<pre style="text-align: left; background: #0f172a; border-radius: 6px; padding: 10px; font-size: 11px; color: #f87171; overflow-x: auto; max-height: 120px; margin: 0 0 16px;">' + (e.message || 'JavaScript runtime initialization failed') + '</pre>' +
+              '<button onclick="window.location.reload()" style="background: #f97316; color: white; border: none; padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;">Reload Application</button>' +
+              '</div>';
+          }
+        });
+      </script>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
