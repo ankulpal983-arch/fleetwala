@@ -382,7 +382,10 @@ export async function submitLiveJobDraft(jobId: string): Promise<RepositoryResul
   if (!c) return { ok: false, error: 'Database not connected.' };
 
   const { error } = await c.rpc('submit_job', { p_job_id: jobId });
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    console.error('[Repo] submitLiveJobDraft error:', error);
+    return { ok: false, error: error.message };
+  }
   return { ok: true };
 }
 
@@ -394,22 +397,42 @@ export async function createLiveJobDraft(job: JobInput, employerId: string): Pro
   const { data: { user } } = await c.auth.getUser();
   if (!user) return { ok: false, error: 'User not authenticated.' };
 
+  // Explicit validation
+  const title = job.title?.trim() ?? '';
+  if (title.length < 3 || title.length > 150) {
+    return { ok: false, error: 'Job title must be between 3 and 150 characters.' };
+  }
+
+  const description = job.description?.trim() ?? '';
+  if (description.length < 10) {
+    return { ok: false, error: 'Job description must be at least 10 characters.' };
+  }
+
+  const minSalary = Number(job.min_salary);
+  const maxSalary = Number(job.max_salary);
+  if (minSalary && maxSalary && minSalary > maxSalary) {
+    return { ok: false, error: 'Maximum salary must be greater than or equal to minimum salary.' };
+  }
+
   const { data, error } = await c.from('jobs').insert({
     employer_id: employerId,
     created_by: user.id,
-    title: job.title.trim(),
+    title,
     category: job.category,
-    description: job.description.trim(),
+    description,
     city: job.city,
     area: job.area,
-    salary_min_inr: job.min_salary,
-    salary_max_inr: job.max_salary,
-    requires_driving_licence: job.licence_required,
-    expires_at: job.expires_at,
+    salary_min_inr: minSalary || 18000,
+    salary_max_inr: maxSalary || 24000,
+    requires_driving_licence: Boolean(job.licence_required),
+    expires_at: job.expires_at || new Date(Date.now() + 21 * 86400000).toISOString(),
     state: 'draft',
   }).select('id').single();
 
-  if (error || !data) return { ok: false, error: error?.message || 'Failed to create job draft.' };
+  if (error || !data) {
+    console.error('[Repo] createLiveJobDraft error:', error);
+    return { ok: false, error: error?.message || 'Failed to create job draft.' };
+  }
   return { ok: true, data: { jobId: data.id } };
 }
 
@@ -456,21 +479,56 @@ export async function registerLiveEmployer(
 }
 
 /** Fetch active employer organization for the current user */
-export async function getLiveEmployerOrg(): Promise<{ id: string; legal_name: string; employer_type: string; verification_state: string } | null> {
+export async function getLiveEmployerOrg(): Promise<{ id: string; legal_name: string; employer_type: string; verification_state: string; role?: string } | null> {
   const c = getSupabase();
   if (!c) return null;
 
   const { data: { user } } = await c.auth.getUser();
   if (!user) return null;
 
+  // 1. Try server-side authorized resolver RPC first
+  try {
+    const { data: rpcOrg, error: rpcError } = await c.rpc('get_current_employer_org');
+    if (!rpcError && rpcOrg && Array.isArray(rpcOrg) && rpcOrg.length > 0) {
+      const org = rpcOrg[0];
+      return {
+        id: org.id,
+        legal_name: org.legal_name,
+        employer_type: org.employer_type,
+        verification_state: org.verification_state,
+        role: org.role,
+      };
+    }
+  } catch (err) {
+    console.warn('[Repo] get_current_employer_org RPC error:', err);
+  }
+
+  // 2. Client query fallback
   const { data: memberships, error } = await c
     .from('employer_memberships')
     .select('employer_id, role, state')
     .eq('user_id', user.id)
     .eq('state', 'active')
+    .order('created_at', { ascending: true })
     .limit(1);
 
-  if (error || !memberships || memberships.length === 0) return null;
+  if (error || !memberships || memberships.length === 0) {
+    // 3. Fallback: check if user created an employer but membership row was missed
+    const { data: createdOrg } = await c
+      .from('employers')
+      .select('id, legal_name, employer_type, verification_state')
+      .eq('created_by', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (createdOrg && createdOrg.length > 0) {
+      return {
+        ...createdOrg[0],
+        role: 'owner',
+      };
+    }
+    return null;
+  }
 
   const { data: employer } = await c
     .from('employers')
@@ -478,7 +536,12 @@ export async function getLiveEmployerOrg(): Promise<{ id: string; legal_name: st
     .eq('id', memberships[0].employer_id)
     .single();
 
-  return employer ?? null;
+  if (!employer) return null;
+
+  return {
+    ...employer,
+    role: memberships[0].role,
+  };
 }
 
 export interface UserRoleStatus {

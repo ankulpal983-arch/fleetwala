@@ -3,7 +3,7 @@ import { Link } from 'wouter';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Briefcase, CreditCard, Lock, Pencil, Plus, Send, Trash2, UserPlus, Users, UsersRound, Pause, Play, XCircle, ListChecks } from 'lucide-react';
+import { Briefcase, CreditCard, Lock, Pencil, Plus, Send, Trash2, UserPlus, Users, UsersRound, Pause, Play, XCircle, ListChecks, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -34,7 +34,7 @@ const COMPANY = 'Ghar-Tak Parcels';
 function useEmployer() {
   const p = usePilot();
   const { session } = useSession();
-  const [liveOrg, setLiveOrg] = useState<{ id: string; legal_name: string; employer_type: string; verification_state: string } | null>(null);
+  const [liveOrg, setLiveOrg] = useState<{ id: string; legal_name: string; employer_type: string; verification_state: string; role?: string } | null>(null);
   const [liveJobs, setLiveJobs] = useState<Job[] | null>(null);
   const [liveApplicants, setLiveApplicants] = useState<LiveApplicant[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -52,12 +52,18 @@ function useEmployer() {
             setLiveJobs(j ?? []);
             setLiveApplicants(a ?? []);
             setLoading(false);
+          }).catch((err) => {
+            console.warn('[useEmployer] jobs/applicants fetch error:', err);
+            setLoading(false);
           });
         } else {
           setLiveJobs([]);
           setLiveApplicants([]);
           setLoading(false);
         }
+      }).catch((err) => {
+        console.warn('[useEmployer] getLiveEmployerOrg error:', err);
+        setLoading(false);
       });
     }
   };
@@ -74,6 +80,7 @@ function useEmployer() {
       jobs: liveJobs ?? [],
       apps: liveApplicants ?? [],
       employer: liveOrg ? { id: liveOrg.id, name: orgName, city: 'India', kind: liveOrg.employer_type, status: orgStatus, joined: '' } : undefined,
+      liveOrg,
       orgName,
       isLive: true,
       loading,
@@ -85,11 +92,11 @@ function useEmployer() {
   const jobIds = new Set(jobs.map((j) => j.id));
   const apps = p.state.applications.filter((a) => jobIds.has(a.job_id));
   const employer = p.state.employers.find((e) => e.id === PILOT_EMPLOYER_ID);
-  return { ...p, jobs, apps, employer, orgName: COMPANY, isLive: false, loading: false, refreshLive: () => {} };
+  return { ...p, jobs, apps, employer, liveOrg: null, orgName: COMPANY, isLive: false, loading: false, refreshLive: () => {} };
 }
 
 export function EmployerOverview() {
-  const { jobs, apps, employer, orgName, isLive } = useEmployer();
+  const { jobs, apps, employer, liveOrg, orgName, isLive, loading } = useEmployer();
   const by = (s: string) => apps.filter((a) => a.status === s).length;
   const funnel: [string, number][] = [
     ['Applied', apps.length],
@@ -100,6 +107,20 @@ export function EmployerOverview() {
   const max = Math.max(1, funnel[0][1]);
   return (
     <div>
+      {isLive && !loading && !liveOrg && (
+        <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-xs text-destructive" role="alert">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-sm">Employer profile required</p>
+              <p className="mt-0.5 text-muted-foreground">Complete your employer workspace setup to manage listings, create jobs, and review applicants.</p>
+            </div>
+          </div>
+          <Link href="/onboarding/employer" className="inline-flex h-8 items-center rounded-md bg-destructive px-3 font-medium text-destructive-foreground hover:bg-destructive/90" data-testid="link-complete-employer-onboarding">
+            Complete Setup
+          </Link>
+        </div>
+      )}
       <PageHeader eyebrow={`${orgName} · employer`} title="Hiring overview"
         description={<span className="inline-flex items-center gap-2">Verification: <StatusPill status={employer?.status ?? 'unverified'} /></span>}
         actions={<Link href="/employer/jobs" className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground" data-testid="link-post-job"><Plus className="h-4 w-4" />Post a job</Link>} />
@@ -174,12 +195,14 @@ const toForm = (j?: Job): JobForm => ({
   fuel_allowance: j?.fuel_allowance ?? false, licence_required: j?.licence_required ?? false, description: j?.description ?? '',
 });
 
-function JobDialog({ open, onOpenChange, job }: { open: boolean; onOpenChange: (o: boolean) => void; job?: Job }) {
+function JobDialog({ open, onOpenChange, job, orgId }: { open: boolean; onOpenChange: (o: boolean) => void; job?: Job; orgId?: string }) {
   const { actions } = usePilot();
   const { session } = useSession();
   const { toast } = useToast();
   const form = useForm<JobForm>({ resolver: zodResolver(jobSchema), values: toForm(job) });
   const city = form.watch('city');
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const save = async (v: JobForm, submit: boolean) => {
     const input: JobInput = {
@@ -188,28 +211,67 @@ function JobDialog({ open, onOpenChange, job }: { open: boolean; onOpenChange: (
     };
 
     if (liveMode && session) {
-      const org = await getLiveEmployerOrg();
-      if (!org) {
-        toast({ title: 'Employer profile required', description: 'Please complete employer onboarding first.', variant: 'destructive' });
-        return;
-      }
-      const res = await createLiveJobDraft(input, org.id);
-      if (res.ok && res.data) {
-        if (submit) {
-          await submitLiveJobDraft(res.data.jobId);
+      if (submit) setIsSubmitting(true);
+      else setIsSavingDraft(true);
+
+      try {
+        const org = await getLiveEmployerOrg();
+        const targetOrgId = org?.id || orgId;
+        if (!targetOrgId) {
+          toast({
+            title: 'Employer profile required',
+            description: 'Please complete employer onboarding first.',
+            variant: 'destructive',
+          });
+          return;
         }
+
+        const res = await createLiveJobDraft(input, targetOrgId);
+        if (res.ok && res.data) {
+          if (submit) {
+            const subRes = await submitLiveJobDraft(res.data.jobId);
+            if (!subRes.ok) {
+              toast({
+                title: 'Draft saved, review pending',
+                description: `Saved as draft. Review submission note: ${subRes.error}`,
+              });
+            } else {
+              toast({
+                title: 'Submitted for review',
+                description: 'Sent to admin moderation queue.',
+              });
+            }
+          } else {
+            toast({
+              title: 'Draft saved',
+              description: v.title,
+            });
+          }
+          onOpenChange(false);
+        } else {
+          toast({
+            title: 'Failed to save job',
+            description: res.error,
+            variant: 'destructive',
+          });
+        }
+      } catch (err: any) {
         toast({
-          title: submit ? 'Submitted for review' : 'Draft saved',
-          description: submit ? 'Sent to admin moderation queue.' : v.title,
+          title: 'Operation error',
+          description: err?.message || 'Failed to complete job request.',
+          variant: 'destructive',
         });
-        onOpenChange(false);
-      } else {
-        toast({ title: 'Failed to save job', description: res.error, variant: 'destructive' });
+      } finally {
+        setIsSavingDraft(false);
+        setIsSubmitting(false);
       }
     } else {
       const id = actions.saveJob(input, PILOT_EMPLOYER_ID, COMPANY, job?.id);
       if (submit) actions.setJobStatus(id, 'pending', COMPANY);
-      toast({ title: submit ? 'Submitted for review' : 'Draft saved', description: submit ? 'A pilot admin can approve it under Admin > Job moderation.' : v.title });
+      toast({
+        title: submit ? 'Submitted for review' : 'Draft saved',
+        description: submit ? 'A pilot admin can approve it under Admin > Job moderation.' : v.title,
+      });
       onOpenChange(false);
     }
   };
@@ -254,8 +316,38 @@ function JobDialog({ open, onOpenChange, job }: { open: boolean; onOpenChange: (
           </form>
         </Form>
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={form.handleSubmit((v) => save(v, false))} data-testid="button-save-draft">Save draft</Button>
-          <Button onClick={form.handleSubmit((v) => save(v, true))} data-testid="button-submit-job"><Send className="mr-1.5 h-4 w-4" />Submit for review</Button>
+          <Button
+            variant="outline"
+            disabled={isSavingDraft || isSubmitting}
+            onClick={form.handleSubmit((v) => save(v, false))}
+            data-testid="button-save-draft"
+          >
+            {isSavingDraft ? (
+              <>
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                Saving draft...
+              </>
+            ) : (
+              'Save draft'
+            )}
+          </Button>
+          <Button
+            disabled={isSavingDraft || isSubmitting}
+            onClick={form.handleSubmit((v) => save(v, true))}
+            data-testid="button-submit-job"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                Submitting...
+              </>
+            ) : (
+              <>
+                <Send className="mr-1.5 h-4 w-4" />
+                Submit for review
+              </>
+            )}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -265,13 +357,26 @@ function JobDialog({ open, onOpenChange, job }: { open: boolean; onOpenChange: (
 const STATUS_TABS: (JobStatus | 'all')[] = ['all', 'draft', 'pending', 'approved', 'paused', 'closed'];
 
 export function EmployerJobs() {
-  const { jobs, apps, actions, orgName, isLive, refreshLive } = useEmployer();
+  const { jobs, apps, actions, employer, liveOrg, orgName, isLive, loading, refreshLive } = useEmployer();
   const { toast } = useToast();
   const [filter, setFilter] = useState<JobStatus | 'all'>('all');
   const [editing, setEditing] = useState<Job | undefined>();
   const [open, setOpen] = useState(false);
   const list = jobs.filter((j) => filter === 'all' || j.status === filter);
   
+  const handleNewJobClick = () => {
+    if (isLive && !liveOrg) {
+      toast({
+        title: 'Employer profile required',
+        description: 'Please complete employer onboarding first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setEditing(undefined);
+    setOpen(true);
+  };
+
   const act = async (j: Job, s: JobStatus, msg: string) => {
     if (isLive) {
       if (s === 'pending') {
@@ -291,8 +396,22 @@ export function EmployerJobs() {
 
   return (
     <div>
+      {isLive && !loading && !liveOrg && (
+        <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-xs text-destructive" role="alert">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-sm">Employer profile required</p>
+              <p className="mt-0.5 text-muted-foreground">Complete your employer workspace setup to manage listings, create jobs, and review applicants.</p>
+            </div>
+          </div>
+          <Link href="/onboarding/employer" className="inline-flex h-8 items-center rounded-md bg-destructive px-3 font-medium text-destructive-foreground hover:bg-destructive/90" data-testid="link-complete-employer-onboarding-jobs">
+            Complete Setup
+          </Link>
+        </div>
+      )}
       <PageHeader eyebrow={orgName} title="Jobs" description="Drafts stay private. Submitted jobs go live only after admin approval."
-        actions={<Button onClick={() => { setEditing(undefined); setOpen(true); }} data-testid="button-new-job"><Plus className="mr-1.5 h-4 w-4" />New job</Button>} />
+        actions={<Button onClick={handleNewJobClick} data-testid="button-new-job"><Plus className="mr-1.5 h-4 w-4" />New job</Button>} />
       <div className="scrollbar-none mb-4 flex gap-1 overflow-x-auto">
         {STATUS_TABS.map((s) => (
           <button key={s} onClick={() => setFilter(s)} className={cn('shrink-0 rounded-full border px-3 py-1 text-sm capitalize', filter === s ? 'border-foreground bg-foreground text-background' : 'bg-card hover:bg-muted')} data-testid={`filter-job-${s}`}>
@@ -301,7 +420,7 @@ export function EmployerJobs() {
         ))}
       </div>
       {list.length === 0 ? (
-        <EmptyState icon={Briefcase} title="No jobs here" body="Create a draft, then submit it for review when ready." action={<Button onClick={() => { setEditing(undefined); setOpen(true); }}>New job</Button>} />
+        <EmptyState icon={Briefcase} title="No jobs here" body="Create a draft, then submit it for review when ready." action={<Button onClick={handleNewJobClick}>New job</Button>} />
       ) : (
         <div className="overflow-hidden rounded-xl border bg-card">
           <Table>
@@ -338,7 +457,7 @@ export function EmployerJobs() {
           </Table>
         </div>
       )}
-      <JobDialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) refreshLive(); }} job={editing} />
+      <JobDialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) refreshLive(); }} job={editing} orgId={employer?.id} />
     </div>
   );
 }

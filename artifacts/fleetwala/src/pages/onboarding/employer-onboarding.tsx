@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import {
   Building2, ShieldAlert, CheckCircle2, AlertCircle, ArrowRight,
@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Wordmark, PilotChip } from '@/components/shell';
 import { CITIES, CITY_NAMES } from '@/lib/fixtures';
 import { useSession } from '@/lib/supabase';
-import { registerLiveEmployer } from '@/lib/repo';
+import { registerLiveEmployer, getLiveEmployerOrg } from '@/lib/repo';
 
 type EmployerType = 'company' | 'vendor_dsp' | 'recruitment_agency';
 
@@ -27,6 +27,16 @@ export function EmployerOnboardingPage() {
   const [website, setWebsite] = useState('');
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (session) {
+      getLiveEmployerOrg().then((org) => {
+        if (org) {
+          navigate('/employer');
+        }
+      });
+    }
+  }, [session]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
