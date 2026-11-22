@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'wouter';
 import { ArrowRight, EyeOff, Lock, Mail, MapPin, Phone, ShieldCheck, Settings2, Gauge, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PilotChip, Wordmark } from '@/components/shell';
 import { Monogram } from '@/components/common';
+import { cn } from '@/lib/utils';
 import {
   gate, liveRequested, normalizeIndianPhone, sendEmailMagicLink, sendPhoneOtp, signOut, supabaseConfigured, useSession, verifyPhoneOtp,
 } from '@/lib/supabase';
@@ -99,9 +100,16 @@ export function Login() {
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setInterval(() => setCooldown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [cooldown]);
 
   const run = async (fn: () => Promise<{ ok: boolean; error?: string }>, success: string, after?: () => void) => {
     setBusy(true); setMsg(null);
@@ -135,7 +143,7 @@ export function Login() {
               <TabsList className="grid w-full grid-cols-2"><TabsTrigger value="worker" data-testid="tab-worker-login">Worker</TabsTrigger><TabsTrigger value="employer" data-testid="tab-employer-login">Employer</TabsTrigger></TabsList>
               <TabsContent value="worker" className="mt-5">
                 {!otpSent ? (
-                  <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); run(() => sendPhoneOtp(phone), 'Code sent by SMS.', () => setOtpSent(true)); }}>
+                  <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); run(() => sendPhoneOtp(phone), 'Code sent by SMS.', () => { setOtpSent(true); setCooldown(45); }); }}>
                     <Label htmlFor="phone">Mobile number</Label>
                     <div className="flex"><span className="flex items-center rounded-l-md border border-r-0 bg-muted px-3 font-mono text-sm">+91</span>
                       <Input id="phone" inputMode="tel" autoComplete="tel-national" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98xxxxxxxx" className="rounded-l-none" aria-invalid={phone.length > 0 && !phoneValid} data-testid="input-phone" /></div>
@@ -147,7 +155,10 @@ export function Login() {
                     <Label htmlFor="otp">6-digit code sent to {normalizeIndianPhone(phone)}</Label>
                     <Input id="otp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} className="font-mono tracking-[0.5em]" data-testid="input-otp" />
                     <Button type="submit" className="w-full" disabled={busy || otp.length !== 6} data-testid="button-verify-otp">{busy ? 'Checking' : 'Verify'}</Button>
-                    <button type="button" className="text-xs underline" onClick={() => { setOtpSent(false); setOtp(''); }}>Change number</button>
+                    <div className="flex items-center justify-between pt-1 text-xs">
+                      <button type="button" className="underline text-muted-foreground hover:text-foreground" onClick={() => { setOtpSent(false); setOtp(''); }}>Change number</button>
+                      <button type="button" disabled={busy || cooldown > 0} className={cn("font-medium", cooldown > 0 ? "text-muted-foreground cursor-not-allowed" : "text-primary underline")} onClick={() => run(() => sendPhoneOtp(phone), 'New code sent by SMS.', () => setCooldown(45))} data-testid="button-resend-otp">{cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}</button>
+                    </div>
                   </form>
                 )}
               </TabsContent>
