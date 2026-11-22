@@ -55,7 +55,8 @@ Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 ├── supabase/
 │   └── migrations/         # 15 modular PostgreSQL SQL migrations
 ├── docs/
-│   ├── audit/              # Comprehensive audit reports (00 to 08)
+│   ├── audit/              # Comprehensive audit reports (00 to 21)
+│   ├── OWNER_ACTIONS_PREPRODUCTION.md # Staging onboarding runbook
 │   └── sql-execution-order.md # Staging SQL execution guide
 ├── package.json            # Monorepo root config
 ├── pnpm-workspace.yaml     # Workspace definition
@@ -66,9 +67,12 @@ Open **[http://localhost:3000](http://localhost:3000)** in your browser.
 
 ## Authentication & Database
 
-- **Authentication:** Exclusively **Supabase Auth**.
-  - Workers sign in with Indian Mobile Phone OTP (`+91`).
-  - Employers sign in with Work Email Magic Link.
-  - Admins are provisioned via server-side allowlist (`admin_principals`).
-- **Database:** Supabase PostgreSQL with Row Level Security (RLS) on all 27 tables.
-- **Detailed Audit Documentation:** See [docs/audit/00-executive-summary.md](docs/audit/00-executive-summary.md).
+- **Remote GitHub Repository:** [https://github.com/ankulpal983-arch/fleetwala](https://github.com/ankulpal983-arch/fleetwala)
+- **Supabase Staging Project:** `jigbzsaaowtyaqhreplg` ([https://jigbzsaaowtyaqhreplg.supabase.co](https://jigbzsaaowtyaqhreplg.supabase.co))
+- **Authentication:** Exclusively **Supabase Auth** (PKCE).
+  - Workers & Employers sign in with Email + Password, Google OAuth, or GitHub OAuth.
+  - Mobile Phone OTP / MSG91 is deferred for pre-production (phone numbers are optional profile attributes).
+  - Admins are provisioned strictly via server-side allowlist (`admin_principals`) with MFA. No client self-registration.
+- **Database:** Supabase PostgreSQL (Postgres 17.12) with Row Level Security (RLS) on all 27 tables.
+- **Detailed Audit Documentation:** See [docs/audit/21-github-and-supabase-staging-integration.md](docs/audit/21-github-and-supabase-staging-integration.md).
+
