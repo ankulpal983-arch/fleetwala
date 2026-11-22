@@ -436,6 +436,54 @@ export async function createLiveJobDraft(job: JobInput, employerId: string): Pro
   return { ok: true, data: { jobId: data.id } };
 }
 
+/** Update an existing job draft in Supabase */
+export async function updateLiveJobDraft(jobId: string, job: JobInput): Promise<RepositoryResult> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { data: { user } } = await c.auth.getUser();
+  if (!user) return { ok: false, error: 'User not authenticated.' };
+
+  const title = job.title?.trim() ?? '';
+  if (title.length < 3 || title.length > 150) {
+    return { ok: false, error: 'Job title must be between 3 and 150 characters.' };
+  }
+
+  const description = job.description?.trim() ?? '';
+  if (description.length < 10) {
+    return { ok: false, error: 'Job description must be at least 10 characters.' };
+  }
+
+  const minSalary = Number(job.min_salary);
+  const maxSalary = Number(job.max_salary);
+  if (minSalary && maxSalary && minSalary > maxSalary) {
+    return { ok: false, error: 'Maximum salary must be greater than or equal to minimum salary.' };
+  }
+
+  const { error } = await c
+    .from('jobs')
+    .update({
+      title,
+      category: job.category,
+      description,
+      city: job.city,
+      area: job.area,
+      salary_min_inr: minSalary || 18000,
+      salary_max_inr: maxSalary || 24000,
+      requires_driving_licence: Boolean(job.licence_required),
+      expires_at: job.expires_at || new Date(Date.now() + 21 * 86400000).toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', jobId)
+    .eq('state', 'draft');
+
+  if (error) {
+    console.error('[Repo] updateLiveJobDraft error:', error);
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}
+
 /** Review job by Administrator */
 export async function reviewLiveJob(jobId: string, approve: boolean, reason: string): Promise<RepositoryResult> {
   const c = getSupabase();

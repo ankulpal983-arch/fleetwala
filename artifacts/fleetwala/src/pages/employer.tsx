@@ -25,7 +25,7 @@ import type { AppStatus, Candidate, Job, JobCategory, JobStatus, TeamMember } fr
 import { liveMode, useSession } from '@/lib/supabase';
 import {
   discoverLiveCandidates, getLiveEmployerOrg, createLiveJobDraft,
-  submitLiveJobDraft, getLiveEmployerJobs, getLiveEmployerApplicants,
+  updateLiveJobDraft, submitLiveJobDraft, getLiveEmployerJobs, getLiveEmployerApplicants,
   setLiveApplicationStatus, type LiveApplicant
 } from '@/lib/repo';
 
@@ -195,7 +195,7 @@ const toForm = (j?: Job): JobForm => ({
   fuel_allowance: j?.fuel_allowance ?? false, licence_required: j?.licence_required ?? false, description: j?.description ?? '',
 });
 
-function JobDialog({ open, onOpenChange, job, orgId }: { open: boolean; onOpenChange: (o: boolean) => void; job?: Job; orgId?: string }) {
+function JobDialog({ open, onOpenChange, job, orgId, onSuccess }: { open: boolean; onOpenChange: (o: boolean) => void; job?: Job; orgId?: string; onSuccess?: () => void }) {
   const { actions } = usePilot();
   const { session } = useSession();
   const { toast } = useToast();
@@ -215,46 +215,68 @@ function JobDialog({ open, onOpenChange, job, orgId }: { open: boolean; onOpenCh
       else setIsSavingDraft(true);
 
       try {
-        const org = await getLiveEmployerOrg();
-        const targetOrgId = org?.id || orgId;
-        if (!targetOrgId) {
-          toast({
-            title: 'Employer profile required',
-            description: 'Please complete employer onboarding first.',
-            variant: 'destructive',
-          });
-          return;
+        let activeJobId = job?.id;
+
+        if (activeJobId) {
+          // Updating existing draft
+          const updRes = await updateLiveJobDraft(activeJobId, input);
+          if (!updRes.ok) {
+            toast({
+              title: 'Failed to update draft',
+              description: updRes.error,
+              variant: 'destructive',
+            });
+            return;
+          }
+        } else {
+          // Creating brand new draft
+          const org = await getLiveEmployerOrg();
+          const targetOrgId = org?.id || orgId;
+          if (!targetOrgId) {
+            toast({
+              title: 'Employer profile required',
+              description: 'Please complete employer onboarding first.',
+              variant: 'destructive',
+            });
+            return;
+          }
+
+          const res = await createLiveJobDraft(input, targetOrgId);
+          if (!res.ok || !res.data) {
+            toast({
+              title: 'Failed to save job',
+              description: res.error || 'Could not create job listing.',
+              variant: 'destructive',
+            });
+            return;
+          }
+          activeJobId = res.data.jobId;
         }
 
-        const res = await createLiveJobDraft(input, targetOrgId);
-        if (res.ok && res.data) {
-          if (submit) {
-            const subRes = await submitLiveJobDraft(res.data.jobId);
-            if (!subRes.ok) {
-              toast({
-                title: 'Draft saved, review pending',
-                description: `Saved as draft. Review submission note: ${subRes.error}`,
-              });
-            } else {
-              toast({
-                title: 'Submitted for review',
-                description: 'Sent to admin moderation queue.',
-              });
-            }
+        if (submit) {
+          const subRes = await submitLiveJobDraft(activeJobId);
+          if (!subRes.ok) {
+            toast({
+              title: 'Submission failed',
+              description: `Draft saved, but review submission note: ${subRes.error}`,
+              variant: 'destructive',
+            });
+            return;
           } else {
             toast({
-              title: 'Draft saved',
-              description: v.title,
+              title: 'Submitted for review',
+              description: 'Sent to admin moderation queue.',
             });
           }
-          onOpenChange(false);
         } else {
           toast({
-            title: 'Failed to save job',
-            description: res.error,
-            variant: 'destructive',
+            title: job?.id ? 'Draft updated' : 'Draft saved',
+            description: v.title,
           });
         }
+
+        onOpenChange(false);
+        if (onSuccess) onSuccess();
       } catch (err: any) {
         toast({
           title: 'Operation error',
@@ -273,6 +295,7 @@ function JobDialog({ open, onOpenChange, job, orgId }: { open: boolean; onOpenCh
         description: submit ? 'A pilot admin can approve it under Admin > Job moderation.' : v.title,
       });
       onOpenChange(false);
+      if (onSuccess) onSuccess();
     }
   };
 
@@ -457,7 +480,7 @@ export function EmployerJobs() {
           </Table>
         </div>
       )}
-      <JobDialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) refreshLive(); }} job={editing} orgId={employer?.id} />
+      <JobDialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) refreshLive(); }} job={editing} orgId={employer?.id} onSuccess={refreshLive} />
     </div>
   );
 }
