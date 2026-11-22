@@ -187,7 +187,7 @@ export async function getLiveWorkerProfile(): Promise<WorkerProfile | null> {
   };
 }
 
-/** Upsert worker profile to Supabase */
+/** Upsert worker profile to Supabase via secure RPC with direct table fallback */
 export async function saveLiveWorkerProfile(profile: Partial<WorkerProfile>): Promise<RepositoryResult> {
   const c = getSupabase();
   if (!c) return { ok: false, error: 'Database not connected.' };
@@ -195,21 +195,120 @@ export async function saveLiveWorkerProfile(profile: Partial<WorkerProfile>): Pr
   const { data: { user } } = await c.auth.getUser();
   if (!user) return { ok: false, error: 'User not authenticated.' };
 
+  const fullName = (profile.first_name || user.user_metadata?.full_name || 'Worker').trim();
+  const expBand = toDbExperience(profile.experience);
+  const vehType = toDbVehicle(profile.vehicle);
+
+  // 1. Try atomic secure save_worker_profile RPC
+  try {
+    const { error: rpcError } = await c.rpc('save_worker_profile', {
+      p_full_name: fullName,
+      p_city: profile.city || 'Bengaluru',
+      p_address_line: profile.area || '',
+      p_experience_band: expBand,
+      p_vehicle_type: vehType,
+      p_has_own_vehicle: profile.own_vehicle ?? false,
+      p_discoverable: profile.discoverable ?? false,
+      p_availability: profile.available ? 'immediate' : 'unavailable',
+    });
+
+    if (!rpcError) {
+      return { ok: true };
+    }
+    console.warn('[Repo] save_worker_profile RPC returned error, attempting direct upsert:', rpcError.message);
+  } catch (err) {
+    console.warn('[Repo] save_worker_profile RPC failed:', err);
+  }
+
+  // 2. Direct table upsert fallback with RLS ownership
   const payload = {
     user_id: user.id,
-    full_name: profile.first_name,
+    full_name: fullName,
     city: profile.city,
     address_line: profile.area,
-    experience_band: toDbExperience(profile.experience),
-    vehicle_type: toDbVehicle(profile.vehicle),
+    experience_band: expBand,
+    vehicle_type: vehType,
     has_own_vehicle: profile.own_vehicle ?? false,
     discoverable: profile.discoverable ?? false,
     availability: profile.available ? 'immediate' : 'unavailable',
+    account_state: 'active' as const,
   };
 
   const { error } = await c.from('workers').upsert(payload, { onConflict: 'user_id' });
   if (error) return { ok: false, error: error.message };
   return { ok: true };
+}
+
+/** Fetch active worker's real job applications from Supabase */
+export async function getLiveApplications(): Promise<Application[] | null> {
+  const c = getSupabase();
+  if (!c) return null;
+
+  const { data, error } = await c
+    .from('job_applications')
+    .select(`
+      id,
+      job_id,
+      created_at,
+      status_history:application_status_history(old_status, new_status, changed_at),
+      job:jobs(id, title, city, area, employer_id, employers(legal_name))
+    `)
+    .order('created_at', { ascending: false });
+
+  if (error || !data) {
+    console.warn('[Repo] getLiveApplications error:', error?.message);
+    return null;
+  }
+
+  return data.map((item: any) => {
+    const history = (item.status_history || []).sort(
+      (a: any, b: any) => new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime()
+    );
+    const latestStatus: AppStatus = history.length > 0 ? (history[history.length - 1].new_status as AppStatus) : 'applied';
+    const company = item.job?.employers?.legal_name || 'Verified Logistics Partner';
+
+    return {
+      id: item.id,
+      job_id: item.job_id,
+      candidate_id: 'me',
+      status: latestStatus,
+      created_at: item.created_at,
+      history: history.map((h: any) => ({
+        status: h.new_status as AppStatus,
+        at: h.changed_at,
+      })),
+      company,
+    } as Application;
+  });
+}
+
+/** Fetch list of saved job IDs for the active worker */
+export async function getLiveSavedJobs(): Promise<string[] | null> {
+  const c = getSupabase();
+  if (!c) return null;
+
+  const { data, error } = await c
+    .from('saved_jobs')
+    .select('job_id');
+
+  if (error || !data) return null;
+  return data.map((r: { job_id: string }) => r.job_id);
+}
+
+/** Toggle save/unsave for a job in Supabase */
+export async function toggleLiveSavedJob(jobId: string, currentSaved: boolean): Promise<boolean> {
+  const c = getSupabase();
+  if (!c) return !currentSaved;
+
+  if (currentSaved) {
+    const { error } = await c.from('saved_jobs').delete().eq('job_id', jobId);
+    return error ? currentSaved : false;
+  } else {
+    const { data: workerId } = await c.rpc('current_worker_id');
+    if (!workerId) return currentSaved;
+    const { error } = await c.from('saved_jobs').insert({ worker_id: workerId, job_id: jobId });
+    return error ? currentSaved : true;
+  }
 }
 
 /** Fetch candidate discovery preview via secure RPC (exposes zero PII) */
@@ -252,6 +351,33 @@ export async function submitLiveJobDraft(jobId: string): Promise<RepositoryResul
   const { error } = await c.rpc('submit_job', { p_job_id: jobId });
   if (error) return { ok: false, error: error.message };
   return { ok: true };
+}
+
+/** Create a new job draft in Supabase */
+export async function createLiveJobDraft(job: JobInput, employerId: string): Promise<RepositoryResult<{ jobId: string }>> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { data: { user } } = await c.auth.getUser();
+  if (!user) return { ok: false, error: 'User not authenticated.' };
+
+  const { data, error } = await c.from('jobs').insert({
+    employer_id: employerId,
+    created_by: user.id,
+    title: job.title.trim(),
+    category: job.category,
+    description: job.description.trim(),
+    city: job.city,
+    area: job.area,
+    salary_min_inr: job.min_salary,
+    salary_max_inr: job.max_salary,
+    requires_driving_licence: job.licence_required,
+    expires_at: job.expires_at,
+    state: 'draft',
+  }).select('id').single();
+
+  if (error || !data) return { ok: false, error: error?.message || 'Failed to create job draft.' };
+  return { ok: true, data: { jobId: data.id } };
 }
 
 /** Review job by Administrator */

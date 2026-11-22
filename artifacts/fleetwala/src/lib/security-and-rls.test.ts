@@ -93,6 +93,22 @@ test('RLS Negative: Direct anonymous INSERT into public.workers is blocked', asy
   assert.notEqual(error, null, 'Direct insert into workers by anon role must be strictly rejected');
 });
 
+test('RLS Negative: Direct anonymous EXECUTE on save_worker_profile is denied', async () => {
+  const { data, error } = await anonClient.rpc('save_worker_profile', {
+    p_full_name: 'Fake Worker',
+    p_city: 'Bengaluru',
+    p_address_line: 'Area',
+    p_experience_band: 'fresher',
+    p_vehicle_type: 'none',
+  });
+  assert.notEqual(error, null, 'Unauthenticated user cannot execute save_worker_profile');
+});
+
+test('RLS Negative: Direct anonymous UPDATE on public.workers is blocked', async () => {
+  const { data, error } = await anonClient.from('workers').update({ full_name: 'Hacked' }).eq('city', 'Bengaluru');
+  assert.notEqual(error, null, 'Direct update on workers by anon role must be strictly rejected');
+});
+
 test('Security: Admin role cannot be assumed or assigned via client-side registration', () => {
   assert.equal(isAllowedRegistrationRole('admin'), false);
   assert.equal(isAllowedRegistrationRole('administrator'), false);

@@ -23,7 +23,7 @@ import { ago, istDate, salaryRange } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { AppStatus, Candidate, Job, JobCategory, JobStatus, TeamMember } from '@/lib/types';
 import { liveMode, useSession } from '@/lib/supabase';
-import { discoverLiveCandidates } from '@/lib/repo';
+import { discoverLiveCandidates, getLiveEmployerOrg, createLiveJobDraft, submitLiveJobDraft } from '@/lib/repo';
 
 const COMPANY = 'Ghar-Tak Parcels';
 
@@ -111,19 +111,42 @@ const toForm = (j?: Job): JobForm => ({
 
 function JobDialog({ open, onOpenChange, job }: { open: boolean; onOpenChange: (o: boolean) => void; job?: Job }) {
   const { actions } = usePilot();
+  const { session } = useSession();
   const { toast } = useToast();
   const form = useForm<JobForm>({ resolver: zodResolver(jobSchema), values: toForm(job) });
   const city = form.watch('city');
 
-  const save = (v: JobForm, submit: boolean) => {
+  const save = async (v: JobForm, submit: boolean) => {
     const input: JobInput = {
       ...v, category: v.category as JobCategory, min_salary: Number(v.min_salary), max_salary: Number(v.max_salary),
       openings: Number(v.openings), expires_at: new Date(`${v.expires_at}T23:59:00+05:30`).toISOString(),
     };
-    const id = actions.saveJob(input, PILOT_EMPLOYER_ID, COMPANY, job?.id);
-    if (submit) actions.setJobStatus(id, 'pending', COMPANY);
-    toast({ title: submit ? 'Submitted for review' : 'Draft saved', description: submit ? 'A pilot admin can approve it under Admin > Job moderation.' : v.title });
-    onOpenChange(false);
+
+    if (liveMode && session) {
+      const org = await getLiveEmployerOrg();
+      if (!org) {
+        toast({ title: 'Employer profile required', description: 'Please complete employer onboarding first.', variant: 'destructive' });
+        return;
+      }
+      const res = await createLiveJobDraft(input, org.id);
+      if (res.ok && res.data) {
+        if (submit) {
+          await submitLiveJobDraft(res.data.jobId);
+        }
+        toast({
+          title: submit ? 'Submitted for review' : 'Draft saved',
+          description: submit ? 'Sent to admin moderation queue.' : v.title,
+        });
+        onOpenChange(false);
+      } else {
+        toast({ title: 'Failed to save job', description: res.error, variant: 'destructive' });
+      }
+    } else {
+      const id = actions.saveJob(input, PILOT_EMPLOYER_ID, COMPANY, job?.id);
+      if (submit) actions.setJobStatus(id, 'pending', COMPANY);
+      toast({ title: submit ? 'Submitted for review' : 'Draft saved', description: submit ? 'A pilot admin can approve it under Admin > Job moderation.' : v.title });
+      onOpenChange(false);
+    }
   };
 
   const sel = (name: 'category' | 'city' | 'area' | 'shift' | 'vehicle' | 'experience', label: string, options: readonly string[]) => (

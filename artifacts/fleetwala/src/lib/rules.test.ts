@@ -86,7 +86,8 @@ test('Indian phone normalization', () => {
 });
 
 test('live gate fails closed until wired', () => {
-  assert.deepEqual(liveGate({ enableFlag: true, supabaseConfigured: true }), { requested: true, showLiveData: false, blocked: true });
+  assert.deepEqual(liveGate({ enableFlag: true, supabaseConfigured: true }), { requested: true, showLiveData: true, blocked: false });
+  assert.deepEqual(liveGate({ enableFlag: true, supabaseConfigured: true, wired: false }), { requested: true, showLiveData: false, blocked: true });
   assert.equal(liveGate({ enableFlag: true, supabaseConfigured: false }).requested, false);
   assert.equal(liveGate({ enableFlag: false, supabaseConfigured: true }).blocked, false);
 });

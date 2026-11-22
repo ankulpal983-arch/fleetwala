@@ -48,8 +48,8 @@ export function normalizeIndianPhone(input: string): string | null {
   return INDIAN_MOBILE.test(local) ? `+91${local}` : null;
 }
 
-/** Live portal data is blocked until a real integration is wired, whatever the flags say. */
-export const LIVE_PORTAL_WIRED = false;
+/** Live portal data is wired to Supabase PostgreSQL, Auth & RPCs */
+export const LIVE_PORTAL_WIRED = true;
 export function liveGate(opts: { enableFlag: boolean; supabaseConfigured: boolean; wired?: boolean }) {
   const requested = opts.enableFlag && opts.supabaseConfigured;
   const wired = opts.wired ?? LIVE_PORTAL_WIRED;

@@ -24,7 +24,7 @@ import { ago, daysLeft, istDate, salaryRange } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { Application, Job, JobStatus } from '@/lib/types';
 import { liveMode, useSession, getSupabase } from '@/lib/supabase';
-import { getLiveJobs, applyToLiveJob } from '@/lib/repo';
+import { getLiveJobs, applyToLiveJob, getLiveSavedJobs, toggleLiveSavedJob } from '@/lib/repo';
 
 type Sort = 'newest' | 'salary' | 'expiring';
 
@@ -421,8 +421,21 @@ export function JobDetail() {
 
 export function SavedJobs() {
   const { state, actions } = usePilot();
+  const { session } = useSession();
   const myApps = useMyApps();
-  const jobs = state.saved.map((id) => state.jobs.find((j) => j.id === id)).filter((j): j is NonNullable<typeof j> => !!j);
+  const [liveSavedIds, setLiveSavedIds] = useState<string[] | null>(null);
+  const [liveJobsList, setLiveJobsList] = useState<Job[] | null>(null);
+
+  useEffect(() => {
+    if (liveMode && session) {
+      getLiveSavedJobs().then(setLiveSavedIds);
+      getLiveJobs().then(setLiveJobsList);
+    }
+  }, [session]);
+
+  const savedIds = liveMode && session ? (liveSavedIds ?? []) : state.saved;
+  const poolJobs = liveMode && session ? (liveJobsList ?? []) : state.jobs;
+  const jobs = savedIds.map((id) => poolJobs.find((j) => j.id === id)).filter((j): j is NonNullable<typeof j> => !!j);
   return (
     <div>
       <PageHeaderLite title="Saved jobs" sub={`${jobs.length} saved on this device`} />
@@ -432,7 +445,20 @@ export function SavedJobs() {
         <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {jobs.map((j, i) => (
             <div key={j.id} className={cn(!isLiveJob(j) && 'opacity-60')}>
-              <JobCard job={j} index={i} saved onToggleSave={() => actions.toggleSave(j.id)} appStatus={myApps.get(j.id)?.status} />
+              <JobCard
+                job={j}
+                index={i}
+                saved
+                onToggleSave={async () => {
+                  if (liveMode && session) {
+                    await toggleLiveSavedJob(j.id, true);
+                    setLiveSavedIds((prev) => (prev ? prev.filter((x) => x !== j.id) : []));
+                  } else {
+                    actions.toggleSave(j.id);
+                  }
+                }}
+                appStatus={myApps.get(j.id)?.status}
+              />
               {!isLiveJob(j) && <p className="mt-1 text-xs text-muted-foreground">No longer accepting applications.</p>}
             </div>
           ))}

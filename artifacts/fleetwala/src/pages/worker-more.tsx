@@ -21,18 +21,27 @@ import { CITIES, CITY_NAMES, EXPERIENCE, VEHICLES } from '@/lib/fixtures';
 import { profileProgress, STORAGE_KEY, usePilot } from '@/lib/store';
 import { ago, istStamp } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { AppStatus } from '@/lib/types';
+import type { AppStatus, Application } from '@/lib/types';
 import { liveMode, useSession } from '@/lib/supabase';
-import { getLiveWorkerProfile, saveLiveWorkerProfile } from '@/lib/repo';
+import { getLiveWorkerProfile, saveLiveWorkerProfile, getLiveApplications } from '@/lib/repo';
 
 const FLOW: AppStatus[] = ['applied', 'viewed', 'shortlisted', 'hired'];
 
 export function Applications() {
   const { state, actions } = usePilot();
+  const { session } = useSession();
   const { toast } = useToast();
   const [tab, setTab] = useState<'active' | 'closed'>('active');
-  const mine = state.applications.filter((a) => a.candidate_id === 'me');
-  const list = mine
+  const [liveApps, setLiveApps] = useState<Application[] | null>(null);
+
+  useEffect(() => {
+    if (liveMode && session) {
+      getLiveApplications().then(setLiveApps);
+    }
+  }, [session]);
+
+  const appsSource: Application[] = liveMode && session ? (liveApps ?? []) : state.applications.filter((a) => a.candidate_id === 'me');
+  const list = appsSource
     .filter((a) => (tab === 'active' ? ['applied', 'viewed', 'shortlisted'].includes(a.status) : ['hired', 'rejected', 'withdrawn'].includes(a.status)))
     .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
 
@@ -49,7 +58,7 @@ export function Applications() {
           {list.map((a, i) => {
             const job = state.jobs.find((j) => j.id === a.job_id);
             if (!job) return null;
-            const reached = a.history.map((h) => h.status);
+            const reached = (a.history || []).map((h: { status: AppStatus; at: string }) => h.status);
             const ended = ['rejected', 'withdrawn'].includes(a.status);
             return (
               <article key={a.id} className="rise rounded-xl border bg-card p-4 md:p-5" style={{ animationDelay: `${i * 50}ms` }} data-testid={`card-application-${a.id}`}>
@@ -63,7 +72,7 @@ export function Applications() {
                 </div>
                 <ol className="mt-5 grid grid-cols-4 gap-1" aria-label="Application timeline">
                   {FLOW.map((s) => {
-                    const h = a.history.find((x) => x.status === s);
+                    const h = (a.history || []).find((x: { status: AppStatus; at: string }) => x.status === s);
                     const done = reached.includes(s);
                     return (
                       <li key={s} className="relative">
