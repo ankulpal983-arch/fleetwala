@@ -884,13 +884,63 @@ export function EmployerCandidates() {
   }, [session, area]);
 
   const candidatesSource = liveMode ? (liveCandidates ?? []) : state.candidates;
-  const list = useMemo(() => candidatesSource.filter((c) => area === 'all' || c.area === area), [candidatesSource, area]);
+  const list = useMemo(() => {
+    if (area === 'all') return candidatesSource;
+    const lowerArea = area.toLowerCase();
+    return candidatesSource.filter((c) =>
+      c.area.toLowerCase().includes(lowerArea) ||
+      (c.city && c.city.toLowerCase().includes(lowerArea))
+    );
+  }, [candidatesSource, area]);
+
   return (
     <div>
-      <PageHeader eyebrow={COMPANY} title="Find Candidates" description="Anonymised cards of workers who opted in to discovery. Contact details are masked until authorized."
-        actions={<Select value={area} onValueChange={setArea}><SelectTrigger className="w-48" data-testid="select-candidate-area"><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="all">All Bengaluru areas</SelectItem>{CITIES.Bengaluru.map((a) => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent></Select>} />
-      {list.length === 0 ? <EmptyState icon={UsersRound} title="No candidates in this area" body="Try another area." /> : (
+      <PageHeader
+        eyebrow={COMPANY}
+        title="Find Candidates"
+        description="Anonymised cards of workers who opted in to discovery. Contact details are masked until authorized."
+        actions={
+          <div className="flex items-center gap-2">
+            <Select value={area} onValueChange={setArea}>
+              <SelectTrigger className="w-56" data-testid="select-candidate-area">
+                <SelectValue placeholder="All Regions & Areas" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Regions & Areas</SelectItem>
+                <SelectItem value="Delhi NCR">Delhi NCR (Dwarka / Okhla)</SelectItem>
+                <SelectItem value="Bengaluru">Bengaluru (All Hubs)</SelectItem>
+                <SelectItem value="Mumbai">Mumbai (Bhiwandi / Andheri)</SelectItem>
+                <SelectItem value="Hyderabad">Hyderabad</SelectItem>
+                <SelectItem value="Pune">Pune</SelectItem>
+                <SelectItem value="Chennai">Chennai</SelectItem>
+              </SelectContent>
+            </Select>
+            <Link href="/employer/applicants">
+              <Button size="sm" variant="outline" className="hidden sm:inline-flex">
+                <Users className="mr-1.5 h-3.5 w-3.5" />
+                View Applicants
+              </Button>
+            </Link>
+          </div>
+        }
+      />
+
+      <div className="mb-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <span>
+          <strong>Pro-tip:</strong> Verified workers who opted into discovery appear below. You can send them an in-app hiring invitation to apply. To chat with existing applicants, review them in the <strong>Applicants</strong> tab.
+        </span>
+        <Link href="/employer/applicants" className="font-semibold text-primary underline shrink-0">
+          Go to Applicants &rarr;
+        </Link>
+      </div>
+
+      {list.length === 0 ? (
+        <EmptyState
+          icon={UsersRound}
+          title="No discoverable candidates found in this region"
+          body="Workers must enable discoverability in their profile to appear here. Try selecting 'All Regions & Areas' to view all active candidates."
+        />
+      ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {list.map((c, i) => (
             <article key={c.id} className="rise rounded-xl border bg-card p-4" style={{ animationDelay: `${i * 40}ms` }} data-testid={`card-candidate-${c.id}`}>

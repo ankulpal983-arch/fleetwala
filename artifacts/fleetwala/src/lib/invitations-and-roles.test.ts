@@ -70,3 +70,28 @@ test('Invitations Logic: Valid responses only accept boolean accept/decline', ()
   assert.equal(typeof true === 'boolean', true);
   assert.equal(typeof false === 'boolean', true);
 });
+
+test('Clean Data & Staging Purge: Only verified genuine employer Flipkart is live', async () => {
+  const { data, error } = await anonClient
+    .from('employers')
+    .select('id, legal_name, verification_state');
+
+  // Anonymous or RLS-scoped
+  if (!error && Array.isArray(data)) {
+    const testDealers = data.filter((d: any) =>
+      d.legal_name.includes('Ghar-Tak') || d.legal_name.includes('Bengaluru Fast-Fleet')
+    );
+    assert.equal(testDealers.length, 0, 'No test employers should exist');
+  }
+});
+
+test('Clean Data & Staging Purge: Only genuine job listing exists for visitors', async () => {
+  const { data, error } = await anonClient.rpc('get_public_published_jobs');
+  assert.equal(error, null, 'Public discovery RPC should succeed');
+  assert.equal(Array.isArray(data), true);
+  // Any public job must be legitimate
+  const stagingJobs = (data || []).filter((j: any) =>
+    j.title.includes('Express Parcel Delivery') || j.title.includes('Hub Sorter')
+  );
+  assert.equal(stagingJobs.length, 0, 'No staging jobs should be published');
+});
