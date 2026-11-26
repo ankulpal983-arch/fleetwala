@@ -5,7 +5,8 @@
  */
 
 import { getSupabase, supabaseConfigured } from './supabase';
-import type { AppStatus, Application, Candidate, Employer, Job, JobStatus, Notice, Thread, WorkerProfile } from './types';
+import { istDay } from './rules';
+import type { AppStatus, Application, AuditEntry, Candidate, Employer, Job, JobStatus, Notice, Thread, TicketStatus, WorkerProfile } from './types';
 import type { JobInput } from './store';
 
 export interface RepositoryResult<T = void> {
@@ -206,7 +207,7 @@ export async function getLiveEmployerJobs(employerId?: string): Promise<Job[] | 
 /** Apply to job using atomic backend RPC (enforces 20/day IST limit & row lock) */
 export async function applyToLiveJob(jobId: string): Promise<RepositoryResult<{ applicationId: string; wasExisting: boolean }>> {
   const c = getSupabase();
-  if (!c) return { ok: false, error: 'Database not connected. Operating in pilot mode.' };
+  if (!c) return { ok: false, error: 'Database connection unavailable. Please try again later.' };
 
   const { data, error } = await c.rpc('apply_to_job', { p_job_id: jobId });
   if (error) {
@@ -303,16 +304,81 @@ export async function saveLiveWorkerProfile(profile: Partial<WorkerProfile>): Pr
   return { ok: true };
 }
 
+/** Atomically toggle worker discoverability without altering other profile columns */
+export async function setLiveWorkerDiscoverability(discoverable: boolean): Promise<RepositoryResult<boolean>> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { data: { user } } = await c.auth.getUser();
+  if (!user) return { ok: false, error: 'Please sign in first.' };
+
+  const { data: rpcRes, error: rpcErr } = await c.rpc('set_worker_discoverability', {
+    p_discoverable: discoverable,
+  });
+
+  if (!rpcErr) {
+    return { ok: true, data: Boolean(rpcRes) };
+  }
+
+  // Fallback only when Migration 027 RPC is not yet registered; never overwrites other columns.
+  if (rpcErr.code === 'PGRST202' || rpcErr.message?.includes('set_worker_discoverability')) {
+    const { data: existing, error: fetchErr } = await c
+      .from('workers')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (fetchErr || !existing) {
+      return { ok: false, error: 'Please save your worker profile before changing discoverability.' };
+    }
+
+    const { error: updErr } = await c
+      .from('workers')
+      .update({ discoverable, updated_at: new Date().toISOString() })
+      .eq('user_id', user.id);
+
+    if (updErr) return { ok: false, error: updErr.message };
+    return { ok: true, data: discoverable };
+  }
+
+  return { ok: false, error: rpcErr.message };
+}
+
 /** Fetch active worker's real job applications from Supabase */
 export async function getLiveApplications(): Promise<Application[] | null> {
   const c = getSupabase();
   if (!c) return null;
+
+  // Prefer privacy-safe RPC returning job title & company even if paused/closed
+  const { data: rpcRows, error: rpcErr } = await c.rpc('get_worker_applications');
+  if (!rpcErr && Array.isArray(rpcRows)) {
+    return rpcRows.map((item: any) => {
+      const history = Array.isArray(item.status_history) ? item.status_history : [];
+      const rawStatus = item.latest_status || (history.length > 0 ? history[history.length - 1].status : 'applied');
+      return {
+        id: item.application_id,
+        job_id: item.job_id,
+        candidate_id: 'me',
+        status: fromDbAppStatus(rawStatus),
+        created_at: item.created_at,
+        history: history.map((h: any) => ({
+          status: fromDbAppStatus(h.status),
+          at: h.at,
+        })),
+        company: item.company_name || 'Verified Logistics Partner',
+        job_title: item.job_title || 'Logistics Role',
+        area: item.area || item.city || '',
+        city: item.city || '',
+      } as Application;
+    });
+  }
 
   const { data, error } = await c
     .from('job_applications')
     .select(`
       id,
       job_id,
+      status,
       created_at,
       status_history:application_status_history(old_status, new_status, changed_at),
       job:jobs(id, title, city, area, employer_id, employers(legal_name))
@@ -328,22 +394,35 @@ export async function getLiveApplications(): Promise<Application[] | null> {
     const history = (item.status_history || []).sort(
       (a: any, b: any) => new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime()
     );
-    const latestStatus: AppStatus = history.length > 0 ? (history[history.length - 1].new_status as AppStatus) : 'applied';
+    const latestRaw = history.length > 0 ? history[history.length - 1].new_status : (item.status || 'applied');
     const company = item.job?.employers?.legal_name || 'Verified Logistics Partner';
 
     return {
       id: item.id,
       job_id: item.job_id,
       candidate_id: 'me',
-      status: latestStatus,
+      status: fromDbAppStatus(latestRaw),
       created_at: item.created_at,
-      history: history.map((h: any) => ({
-        status: h.new_status as AppStatus,
-        at: h.changed_at,
-      })),
+      history: history.length > 0
+        ? history.map((h: any) => ({
+            status: fromDbAppStatus(h.new_status),
+            at: h.changed_at,
+          }))
+        : [{ status: fromDbAppStatus(latestRaw), at: item.created_at }],
       company,
+      job_title: item.job?.title || 'Logistics Role',
+      area: item.job?.area || item.job?.city || '',
+      city: item.job?.city || '',
     } as Application;
   });
+}
+
+/** Count worker's applications submitted today (Asia/Kolkata) */
+export async function getLiveWorkerDailyUsage(): Promise<number> {
+  const apps = await getLiveApplications();
+  if (!apps) return 0;
+  const today = istDay(new Date());
+  return apps.filter((a) => istDay(a.created_at) === today).length;
 }
 
 /** Fetch list of saved job IDs for the active worker */
@@ -712,11 +791,40 @@ export async function getLiveEmployerApplicants(employerId?: string): Promise<Li
   const c = getSupabase();
   if (!c) return null;
 
+  // Prefer Migration 027 anonymized SECURITY DEFINER RPC (preserves FW-XXXXXX handle even when discoverable = false)
+  const { data: rpcRows, error: rpcErr } = await c.rpc('get_employer_applicants', {
+    p_employer_id: employerId || null,
+  });
+
+  if (!rpcErr && Array.isArray(rpcRows)) {
+    return rpcRows.map((item: any) => {
+      const history = Array.isArray(item.status_history) ? item.status_history : [];
+      const uiStatus = fromDbAppStatus(item.latest_status || 'applied');
+      const workerSummary = `${item.worker_area || item.worker_city || 'Local'} · ${fromDbExperience(item.experience_band)} · ${fromDbVehicle(item.vehicle_type)}`;
+      return {
+        id: item.application_id,
+        job_id: item.job_id,
+        candidate_id: item.candidate_handle || 'candidate',
+        status: uiStatus,
+        created_at: item.created_at,
+        history: history.map((h: any) => ({
+          status: fromDbAppStatus(h.status),
+          at: h.at,
+        })),
+        company: item.company_name || 'My Organization',
+        job_title: item.job_title || 'Logistics Role',
+        candidate_code: item.candidate_code || 'FW-CANDIDATE',
+        worker_summary: workerSummary,
+      };
+    });
+  }
+
   let query = c
     .from('job_applications')
     .select(`
       id,
       job_id,
+      status,
       created_at,
       status_history:application_status_history(old_status, new_status, changed_at),
       job:jobs!inner(id, title, city, area, employer_id, employers(legal_name)),
@@ -738,13 +846,13 @@ export async function getLiveEmployerApplicants(employerId?: string): Promise<Li
     const history = (item.status_history || []).sort(
       (a: any, b: any) => new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime()
     );
-    const latestDbStatus = history.length > 0 ? history[history.length - 1].new_status : 'applied';
+    const latestDbStatus = history.length > 0 ? history[history.length - 1].new_status : (item.status || 'applied');
     const uiStatus = fromDbAppStatus(latestDbStatus);
     const worker = item.worker;
     const candidateCode = worker?.id ? `FW-${worker.id.slice(0, 6).toUpperCase()}` : 'FW-CANDIDATE';
     const workerSummary = worker
       ? `${worker.city || 'Local'} · ${fromDbExperience(worker.experience_band)} · ${fromDbVehicle(worker.vehicle_type)}`
-      : 'Verified candidate';
+      : 'Applied candidate (contact protected)';
 
     return {
       id: item.id,
@@ -752,10 +860,12 @@ export async function getLiveEmployerApplicants(employerId?: string): Promise<Li
       candidate_id: worker?.id || 'candidate',
       status: uiStatus,
       created_at: item.created_at,
-      history: history.map((h: any) => ({
-        status: fromDbAppStatus(h.new_status),
-        at: h.changed_at,
-      })),
+      history: history.length > 0
+        ? history.map((h: any) => ({
+            status: fromDbAppStatus(h.new_status),
+            at: h.changed_at,
+          }))
+        : [{ status: uiStatus, at: item.created_at }],
       company: item.job?.employers?.legal_name || 'My Organization',
       job_title: item.job?.title || 'Logistics Role',
       candidate_code: candidateCode,
@@ -815,7 +925,140 @@ export async function getLiveAdminJobs(): Promise<Job[] | null> {
     expires_at: j.expires_at || new Date(Date.now() + 30 * 86400000).toISOString(),
     created_at: j.created_at,
     moderation_note: j.review_note,
+    employer_status: (j.employers?.verification_state === 'pending' ? 'unverified' : j.employers?.verification_state) || 'unverified',
   }));
+}
+
+/** Pause, reopen, or close a job as platform Admin via admin_set_job_state RPC */
+export async function adminSetLiveJobState(
+  jobId: string,
+  state: 'paused' | 'closed' | 'published',
+  reason: string
+): Promise<RepositoryResult> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { error } = await c.rpc('admin_set_job_state', {
+    p_job_id: jobId,
+    p_state: state,
+    p_reason: reason.trim() || 'Moderated by trust & safety',
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/** Fetch live audit log events for Admin console */
+export async function getLiveAdminAuditLog(): Promise<AuditEntry[] | null> {
+  const c = getSupabase();
+  if (!c) return null;
+
+  const { data, error } = await c
+    .from('audit_log')
+    .select('id, actor_id, action, entity_type, entity_id, details, created_at')
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (error || !data) {
+    console.warn('[Repo] getLiveAdminAuditLog error:', error?.message);
+    return null;
+  }
+
+  return data.map((row: any) => ({
+    id: String(row.id),
+    at: row.created_at,
+    actor: row.actor_id ? `uid:${String(row.actor_id).slice(0, 8)}` : 'system',
+    action: row.action,
+    target: `${row.entity_type}:${row.entity_id}`,
+  }));
+}
+
+export interface LiveSupportTicket {
+  id: string;
+  opened_by: string;
+  subject: string;
+  body: string;
+  status: TicketStatus | 'closed';
+  topic: string;
+  created_at: string;
+}
+
+/** Fetch support tickets for Admin queue */
+export async function getLiveAdminSupportTickets(): Promise<LiveSupportTicket[] | null> {
+  const c = getSupabase();
+  if (!c) return null;
+
+  const { data, error } = await c
+    .from('support_tickets')
+    .select('id, opened_by, subject, details, status, created_at')
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (error || !data) {
+    console.warn('[Repo] getLiveAdminSupportTickets error:', error?.message);
+    return null;
+  }
+
+  return data.map((row: any) => {
+    const m = /^\[([A-Z_]+)\]\s*(.*)$/.exec(row.subject || '');
+    return {
+      id: row.id,
+      opened_by: row.opened_by,
+      subject: m ? m[2] : (row.subject || 'Support ticket'),
+      body: row.details || '',
+      status: row.status,
+      topic: m ? m[1].replace('_', ' ') : 'General',
+      created_at: row.created_at,
+    };
+  });
+}
+
+/** Admin support ticket status transition via audited RPC */
+export async function adminUpdateLiveSupportTicket(
+  ticketId: string,
+  status: TicketStatus,
+  note?: string
+): Promise<RepositoryResult> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Database not connected.' };
+
+  const { error } = await c.rpc('admin_update_support_ticket', {
+    p_ticket_id: ticketId,
+    p_status: status,
+    p_note: note || null,
+  });
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/** Submit an authenticated support/grievance ticket without silent failure */
+export async function submitLiveSupportTicket(
+  subject: string,
+  details: string,
+  employerId?: string | null
+): Promise<RepositoryResult> {
+  const c = getSupabase();
+  if (!c) return { ok: false, error: 'Support backend is not connected.' };
+
+  const { data: { user } } = await c.auth.getUser();
+  if (!user) {
+    return { ok: false, error: 'Please sign in to submit a tracked support or grievance ticket.' };
+  }
+
+  const cleanSubj = subject.trim();
+  const cleanDetails = details.trim();
+  if (cleanSubj.length < 3) return { ok: false, error: 'Subject must be at least 3 characters.' };
+  if (cleanDetails.length < 5) return { ok: false, error: 'Details must be at least 5 characters.' };
+
+  const { error } = await c.from('support_tickets').insert({
+    opened_by: user.id,
+    employer_id: employerId ?? null,
+    subject: cleanSubj,
+    details: cleanDetails,
+  });
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }
 
 /** Fetch all employers for Admin review */
@@ -883,10 +1126,23 @@ export async function getLiveNotifications(): Promise<Notice[] | null> {
     let body = 'You have a new update.';
     let href = undefined;
 
-    if (n.kind === 'application_received') {
+    if (n.kind === 'application_received' || n.kind === 'new_application') {
       title = 'New Application Received';
       body = `A worker applied to your job listing: ${n.payload?.job_title || ''}.`;
       href = '/employer/applicants';
+    } else if (n.kind === 'candidate_invited') {
+      title = 'Hiring Invitation Received';
+      body = `${n.payload?.company || 'A verified employer'} invited you to connect for ${n.payload?.job_title || 'a logistics role'}.`;
+      href = '/applications';
+    } else if (n.kind === 'invitation_accepted' || n.kind === 'invitation_declined') {
+      const accepted = n.kind === 'invitation_accepted';
+      title = accepted ? 'Invitation Accepted' : 'Invitation Declined';
+      body = `A candidate ${accepted ? 'accepted' : 'declined'} your invitation for ${n.payload?.job_title || 'an opening'}.`;
+      href = accepted ? '/employer/messages' : '/employer/applicants';
+    } else if (n.kind === 'support_ticket_update') {
+      title = 'Support Ticket Updated';
+      body = `Ticket "${n.payload?.subject || ''}" is now ${n.payload?.status || 'updated'}.`;
+      href = '/support';
     } else if (n.kind === 'application_status_update') {
       title = `Application ${n.payload?.new_status ? n.payload.new_status.toUpperCase() : 'Updated'}`;
       body = `Your application for ${n.payload?.job_title || 'logistics role'} at ${n.payload?.company || 'FleetWala'} was updated to ${n.payload?.new_status}.`;

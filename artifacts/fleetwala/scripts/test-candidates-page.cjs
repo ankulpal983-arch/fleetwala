@@ -78,9 +78,8 @@ async function testCandidatesBrowser() {
   await send('Page.navigate', { url: 'http://localhost:3000/' });
   await new Promise(r => setTimeout(r, 1000));
 
-  await send('Runtime.evaluate', { expression: "localStorage.setItem('fleetwala_test_auth', 'employer')" });
   await send('Page.navigate', { url: 'http://localhost:3000/employer/candidates' });
-  await new Promise(r => setTimeout(r, 2500));
+  await new Promise(r => setTimeout(r, 2000));
 
   const textRes = await send('Runtime.evaluate', { expression: 'document.body.innerText' });
   const innerText = textRes?.result?.value || '';
@@ -88,32 +87,23 @@ async function testCandidatesBrowser() {
   const htmlRes = await send('Runtime.evaluate', { expression: 'document.getElementById("root")?.innerHTML || ""' });
   const innerHTML = htmlRes?.result?.value || '';
 
-  const svgRes = await send('Runtime.evaluate', {
-    expression: 'Array.from(document.querySelectorAll("svg.lucide-shield-check")).length'
-  });
-  const shieldCheckCount = svgRes?.result?.value || 0;
-
-  console.log('--- CANDIDATE PAGE VERIFICATION ---');
-  console.log('1. Page Header Eyebrow contains org name:', innerText.toLowerCase().includes('flipkart · employer'));
-  console.log('2. Title is Find Candidates:', innerText.includes('Find Candidates'));
-  console.log('3. Privacy Protection banner present:', innerText.includes('Privacy Protection:'));
-  console.log('4. Cryptographic handle explanation present:', innerText.includes('FW-492E4A'));
-  console.log('5. Region selector present:', innerHTML.includes('data-testid="select-candidate-city"'));
-  console.log('6. ShieldCheck SVG icons rendered count:', shieldCheckCount);
-  console.log('7. Errors logged count:', errors.length);
+  console.log('--- CANDIDATE ROUTE GUARD VERIFICATION (NO AUTH BYPASS) ---');
+  console.log('1. Unauthenticated access blocked by Employer Workspace Required guard:', innerText.includes('Employer Workspace Required'));
+  console.log('2. Protected candidate roster not exposed unauthenticated:', !innerText.includes('Privacy Protection:') && !innerHTML.includes('data-testid="select-candidate-city"'));
+  console.log('3. DOM rendered length:', innerHTML.length);
+  console.log('4. Errors logged count:', errors.length);
   if (errors.length > 0) {
     console.log('   Errors detail:', errors);
   }
-  console.log('8. No ShieldCheck error:', !errors.some(e => e.includes('ShieldCheck')));
-  console.log('9. No ReferenceError:', !errors.some(e => e.includes('ReferenceError')));
+  console.log('5. No ShieldCheck error:', !errors.some(e => e.includes('ShieldCheck')));
+  console.log('6. No ReferenceError:', !errors.some(e => e.includes('ReferenceError')));
 
-  await send('Runtime.evaluate', { expression: "localStorage.removeItem('fleetwala_test_auth')" });
   ws.close();
   chrome.kill();
 
-  const success = innerText.includes('Find Candidates') &&
-                  innerText.includes('Privacy Protection:') &&
-                  shieldCheckCount >= 1 &&
+  const success = innerText.includes('Employer Workspace Required') &&
+                  !innerText.includes('Privacy Protection:') &&
+                  !innerHTML.includes('data-testid="select-candidate-city"') &&
                   errors.length === 0;
   console.log('\nOverall Verification Status:', success ? 'PASS' : 'FAIL');
   process.exit(success ? 0 : 1);

@@ -7,6 +7,8 @@ import { cn } from '@/lib/utils';
 import { hashNum, initials } from '@/lib/format';
 import type { AppStatus, JobStatus, TicketStatus, EmployerStatus } from '@/lib/types';
 
+import { liveMode } from '@/lib/supabase';
+
 const STRIPS = ['bg-primary', 'bg-signal', 'bg-chart-4', 'bg-tarmac'];
 
 export function Monogram({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
@@ -23,6 +25,7 @@ export function Monogram({ name, size = 'md' }: { name: string; size?: 'sm' | 'm
 }
 
 export function SampleTag(_props: { className?: string }) {
+  if (liveMode) return null;
   return null;
 }
 

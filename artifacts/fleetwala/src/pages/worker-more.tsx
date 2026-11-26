@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'wouter';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -21,14 +22,15 @@ import { CITIES, CITY_NAMES, EXPERIENCE, VEHICLES } from '@/lib/fixtures';
 import { profileProgress, STORAGE_KEY, usePilot } from '@/lib/store';
 import { ago, istStamp } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { AppStatus, Application, Notice, Thread } from '@/lib/types';
-import { liveMode, useSession, getSupabase } from '@/lib/supabase';
+import type { AppStatus, Application, Notice, Thread, WorkerProfile } from '@/lib/types';
+import { liveMode, useSession } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import {
   getLiveWorkerProfile, saveLiveWorkerProfile, getLiveApplications,
+  setLiveApplicationStatus, setLiveWorkerDiscoverability,
   getLiveNotifications, markLiveNotificationRead, getLiveConversations,
   sendLiveMessage, getLiveWorkerInvitations, respondToLiveCandidateInvitation,
-  type LiveCandidateInvitation
+  submitLiveSupportTicket, type LiveCandidateInvitation
 } from '@/lib/repo';
 
 const FLOW: AppStatus[] = ['applied', 'viewed', 'shortlisted', 'hired'];
@@ -36,10 +38,18 @@ const FLOW: AppStatus[] = ['applied', 'viewed', 'shortlisted', 'hired'];
 export function Applications() {
   const { state, actions } = usePilot();
   const { session } = useSession();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const [tab, setTab] = useState<'active' | 'invitations' | 'closed'>('active');
-  const [liveApps, setLiveApps] = useState<Application[] | null>(null);
   const [liveInvs, setLiveInvs] = useState<LiveCandidateInvitation[]>([]);
+  const uid = session?.user?.id ?? null;
+
+  const { data: liveApps } = useQuery({
+    queryKey: ['worker-applications', uid],
+    enabled: Boolean(liveMode && uid),
+    queryFn: () => getLiveApplications(),
+    staleTime: 30_000,
+  });
 
   const refreshInvs = () => {
     if (liveMode && session) {
@@ -48,10 +58,7 @@ export function Applications() {
   };
 
   useEffect(() => {
-    if (liveMode && session) {
-      getLiveApplications().then(setLiveApps);
-      refreshInvs();
-    }
+    refreshInvs();
   }, [session]);
 
   const handleRespondInvite = async (invitationId: string, accept: boolean) => {
@@ -144,16 +151,19 @@ export function Applications() {
         <div className="space-y-4">
           {list.map((a, i) => {
             const job = state.jobs.find((j) => j.id === a.job_id);
-            if (!job) return null;
+            const jobTitle = job?.title || a.job_title || 'Logistics Role';
+            const companyName = job?.company || a.company || 'Verified Logistics Partner';
+            const areaLabel = job?.area || a.area || '';
             const reached = (a.history || []).map((h: { status: AppStatus; at: string }) => h.status);
             const ended = ['rejected', 'withdrawn'].includes(a.status);
+            const lastEventAt = a.history?.length ? a.history[a.history.length - 1].at : a.created_at;
             return (
               <article key={a.id} className="rise rounded-xl border bg-card p-4 md:p-5" style={{ animationDelay: `${i * 50}ms` }} data-testid={`card-application-${a.id}`}>
                 <div className="flex items-start gap-3">
-                  <Monogram name={job.company} size="sm" />
+                  <Monogram name={companyName} size="sm" />
                   <div className="min-w-0 flex-1">
-                    <Link href={`/jobs/${job.id}`} className="font-display text-lg font-bold hover:underline">{job.title}</Link>
-                    <p className="text-sm text-muted-foreground">{job.company} · {job.area} <SampleTag className="ml-1" /></p>
+                    <Link href={`/jobs/${a.job_id}`} className="font-display text-lg font-bold hover:underline">{jobTitle}</Link>
+                    <p className="text-sm text-muted-foreground">{companyName}{areaLabel ? ` · ${areaLabel}` : ''} <SampleTag className="ml-1" /></p>
                   </div>
                   <StatusPill status={a.status} testId={`status-application-${a.id}`} />
                 </div>
@@ -172,7 +182,7 @@ export function Applications() {
                 </ol>
                 {ended && (
                   <p className="mt-3 rounded-md bg-muted px-3 py-2 text-xs">
-                    {a.status === 'withdrawn' ? 'You withdrew' : 'Not selected this time'} · {istStamp(a.history[a.history.length - 1].at)} IST
+                    {a.status === 'withdrawn' ? 'You withdrew' : 'Not selected this time'} · {istStamp(lastEventAt)} IST
                   </p>
                 )}
                 {!ended && a.status !== 'hired' && (
@@ -181,9 +191,27 @@ export function Applications() {
                       <AlertDialogTrigger asChild><Button variant="ghost" size="sm" data-testid={`button-withdraw-${a.id}`}>Withdraw</Button></AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader><AlertDialogTitle>Withdraw this application?</AlertDialogTitle>
-                          <AlertDialogDescription>{job.company} will see it as withdrawn. You can apply again later while the job is open.</AlertDialogDescription></AlertDialogHeader>
+                          <AlertDialogDescription>{companyName} will see it as withdrawn. You can apply again later while the job is open.</AlertDialogDescription></AlertDialogHeader>
                         <AlertDialogFooter><AlertDialogCancel>Keep it</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => { actions.withdraw(a.id); toast({ title: 'Application withdrawn' }); }} data-testid="button-confirm-withdraw">Withdraw</AlertDialogAction></AlertDialogFooter>
+                          <AlertDialogAction
+                            onClick={async () => {
+                              if (liveMode && session) {
+                                const res = await setLiveApplicationStatus(a.id, 'withdrawn');
+                                if (!res.ok) {
+                                  toast({ title: 'Could not withdraw', description: res.error, variant: 'destructive' });
+                                  return;
+                                }
+                                queryClient.invalidateQueries({ queryKey: ['worker-applications', uid] });
+                                toast({ title: 'Application withdrawn' });
+                                return;
+                              }
+                              actions.withdraw(a.id);
+                              toast({ title: 'Application withdrawn' });
+                            }}
+                            data-testid="button-confirm-withdraw"
+                          >
+                            Withdraw
+                          </AlertDialogAction></AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
                   </div>
@@ -304,11 +332,13 @@ export function Messages() {
 export function Notifications() {
   const { state, actions } = usePilot();
   const { session } = useSession();
+  const queryClient = useQueryClient();
   const [liveNotices, setLiveNotices] = useState<Notice[] | null>(null);
 
   const refreshNotices = () => {
     if (liveMode && session) {
       getLiveNotifications().then(setLiveNotices);
+      queryClient.invalidateQueries({ queryKey: ['notifications-list', session.user?.id] });
     }
   };
 
@@ -381,7 +411,9 @@ type ProfileForm = z.infer<typeof profileSchema>;
 export function Profile() {
   const { state, actions } = usePilot();
   const { session } = useSession();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [loadedProfile, setLoadedProfile] = useState<WorkerProfile>(state.profile);
   const form = useForm<ProfileForm>({ resolver: zodResolver(profileSchema), defaultValues: state.profile });
   const city = form.watch('city');
   const live = form.watch();
@@ -392,7 +424,7 @@ export function Profile() {
     if (liveMode && session) {
       getLiveWorkerProfile().then((p) => {
         if (p) {
-          form.reset({
+          const normalized: ProfileForm = {
             first_name: p.first_name || '',
             city: p.city || 'Bengaluru',
             area: p.area || '',
@@ -401,24 +433,30 @@ export function Profile() {
             own_vehicle: p.own_vehicle ?? false,
             available: p.available ?? true,
             discoverable: p.discoverable ?? false,
-          });
+          };
+          setLoadedProfile(normalized);
+          form.reset(normalized);
         }
       });
     }
-  }, [session]);
+  }, [session?.user?.id]);
 
   const onSubmit = async (v: ProfileForm) => {
     if (liveMode && session) {
       const res = await saveLiveWorkerProfile(v);
       if (res.ok) {
+        setLoadedProfile(v);
         actions.updateProfile(v);
         form.reset(v);
-        toast({ title: 'Profile saved to cloud', description: 'Your profile has been saved securely to Supabase.' });
+        queryClient.invalidateQueries({ queryKey: ['worker-profile', session.user?.id] });
+        queryClient.invalidateQueries({ queryKey: ['live-candidates'] });
+        toast({ title: 'Profile saved', description: 'Your worker profile has been updated in Supabase.' });
       } else {
         toast({ title: 'Failed to save profile', description: res.error, variant: 'destructive' });
       }
       return;
     }
+    setLoadedProfile(v);
     actions.updateProfile(v);
     form.reset(v);
     toast({ title: 'Profile updated', description: 'Your profile details have been saved successfully.' });
@@ -474,7 +512,7 @@ export function Profile() {
                 <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} data-testid="switch-discoverable" /></FormControl>
               </FormItem>)} />
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => form.reset(state.profile)} disabled={!form.formState.isDirty}>Discard</Button>
+              <Button type="button" variant="ghost" onClick={() => form.reset(loadedProfile)} disabled={!form.formState.isDirty}>Discard</Button>
               <Button type="submit" disabled={!form.formState.isDirty} data-testid="button-save-profile">Save profile</Button>
             </div>
           </form>
@@ -505,25 +543,58 @@ export function Profile() {
 export function SettingsPage() {
   const { state, actions } = usePilot();
   const { session, user, roleStatus, logout } = useAuth();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [discoverBusy, setDiscoverBusy] = useState(false);
+
+  const { data: liveWorkerProfile, isLoading: liveProfileLoading } = useQuery({
+    queryKey: ['worker-profile', user?.id],
+    enabled: Boolean(liveMode && session && user?.id),
+    queryFn: () => getLiveWorkerProfile(),
+    staleTime: 60_000,
+  });
+
+  const isDiscoverable = liveMode && session
+    ? Boolean(liveWorkerProfile?.discoverable)
+    : Boolean(state.profile.discoverable);
+
+  const handleToggleDiscoverability = async (next: boolean) => {
+    if (liveMode && session) {
+      setDiscoverBusy(true);
+      const res = await setLiveWorkerDiscoverability(next);
+      setDiscoverBusy(false);
+      if (!res.ok) {
+        toast({ title: 'Could not update discoverability', description: res.error, variant: 'destructive' });
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ['worker-profile', user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['live-candidates'] });
+      toast({ title: next ? 'Discoverability enabled' : 'Discoverability disabled' });
+      return;
+    }
+    actions.updateProfile({ discoverable: next });
+    toast({ title: next ? 'Discoverability enabled' : 'Discoverability disabled' });
+  };
 
   const handleRequestDeletion = async () => {
-    try {
-      const c = getSupabase();
-      if (c && user) {
-        await c.from('support_tickets').insert({
-          opened_by: user.id,
-          subject: '[DATA ERASURE REQUEST] User Account Deletion under DPDP Act 2023',
-          details: `User ${user.email} (ID: ${user.id}) has formally requested account and personal data erasure.`,
+    if (liveMode && user) {
+      const res = await submitLiveSupportTicket(
+        '[DATA ERASURE REQUEST] User Account Deletion under DPDP Act 2023',
+        `User ${user.email} (ID: ${user.id}) formally requested account and personal data erasure.`
+      );
+      if (!res.ok) {
+        toast({
+          title: 'Erasure ticket could not be logged automatically',
+          description: res.error || 'Please email grievance support once configured.',
+          variant: 'destructive',
         });
+        return;
       }
-    } catch {
-      // offline or mock fallback
     }
     actions.reset();
     toast({
       title: 'Deletion request received',
-      description: 'Your data erasure request has been queued under DPDP Act 2023. Logging out...',
+      description: 'Your data erasure request has been recorded under DPDP Act 2023. Logging out...',
     });
     setTimeout(() => {
       logout();
@@ -565,12 +636,9 @@ export function SettingsPage() {
       <section className="divide-y rounded-2xl border bg-card">
         <Row title="Profile discoverability" body="Allow verified employers to view your anonymized candidate profile. Off by default.">
           <Switch
-            checked={Boolean(state.profile.discoverable)}
-            onCheckedChange={(v) => {
-              actions.updateProfile({ discoverable: v });
-              saveLiveWorkerProfile({ ...state.profile, discoverable: v });
-              toast({ title: v ? 'Discoverability enabled' : 'Discoverability disabled' });
-            }}
+            checked={isDiscoverable}
+            disabled={discoverBusy || (liveMode && Boolean(session) && liveProfileLoading)}
+            onCheckedChange={handleToggleDiscoverability}
             data-testid="switch-discoverability"
           />
         </Row>

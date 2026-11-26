@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Wordmark, PilotChip } from '@/components/shell';
 import { useAuth } from '@/lib/auth-context';
 import { getSupabase } from '@/lib/supabase';
+import { submitLiveSupportTicket } from '@/lib/repo';
 import { useToast } from '@/hooks/use-toast';
 
 function LegalHeader() {
@@ -139,7 +140,7 @@ export function PrivacyPage() {
             <div className="mt-3 rounded-lg border bg-muted/40 p-4 font-mono text-xs space-y-1">
               <p><strong>Grievance Officer:</strong> [OWNER ACTION REQUIRED: Name of Officer]</p>
               <p><strong>Designation:</strong> Data Protection & Grievance Redressal Lead</p>
-              <p><strong>Email:</strong> [OWNER ACTION REQUIRED: grievance@fleetwala.com or support@fleetwala.com]</p>
+              <p><strong>Email:</strong> [OWNER ACTION REQUIRED: configure grievance@fleetwala.app or support@fleetwala.app — not yet active]</p>
               <p><strong>Response SLA:</strong> Acknowledgment within 48 hours; resolution within 30 days.</p>
               <p><strong>Physical Address:</strong> [OWNER ACTION REQUIRED: Registered Office Address, Bengaluru, Karnataka, India]</p>
             </div>
@@ -227,39 +228,50 @@ export function TermsPage() {
 }
 
 export function SupportPage() {
-  const { session, user } = useAuth();
+  const { session } = useAuth();
   const { toast } = useToast();
   const [topic, setTopic] = useState<'scam_report' | 'privacy_request' | 'job_issue' | 'employer_help' | 'general'>('scam_report');
   const [subject, setSubject] = useState('');
   const [details, setDetails] = useState('');
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true);
+    setSubmitError(null);
 
+    if (!session) {
+      const msg = 'Please sign in to submit a tracked grievance or support ticket.';
+      setSubmitError(msg);
+      toast({ title: 'Sign in required', description: msg, variant: 'destructive' });
+      return;
+    }
+
+    setBusy(true);
     try {
-      const c = getSupabase();
-      if (c && session) {
-        await c.from('support_tickets').insert({
-          opened_by: user?.id,
-          subject: `[${topic.toUpperCase()}] ${subject.trim()}`,
-          details: details.trim(),
-        });
+      const res = await submitLiveSupportTicket(
+        `[${topic.toUpperCase()}] ${subject.trim()}`,
+        details.trim()
+      );
+      if (!res.ok) {
+        const msg = res.error || 'Unable to record support ticket in database.';
+        setSubmitError(msg);
+        toast({ title: 'Ticket submission failed', description: msg, variant: 'destructive' });
+        return;
       }
 
       setSubmitted(true);
+      setSubject('');
+      setDetails('');
       toast({
         title: 'Support request received',
-        description: 'Our trust & safety team will review your ticket within 48 hours.',
+        description: 'Your ticket has been recorded for trust & safety review.',
       });
-    } catch {
-      toast({
-        title: 'Request logged',
-        description: 'Your inquiry has been queued for review.',
-      });
-      setSubmitted(true);
+    } catch (err: any) {
+      const msg = err?.message || 'Unexpected error submitting support ticket.';
+      setSubmitError(msg);
+      toast({ title: 'Ticket submission failed', description: msg, variant: 'destructive' });
     } finally {
       setBusy(false);
     }
@@ -356,6 +368,12 @@ export function SupportPage() {
                 />
               </div>
 
+              {submitError && (
+                <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive" data-testid="text-support-error">
+                  {submitError}
+                </div>
+              )}
+
               <div className="flex justify-end pt-2">
                 <Button type="submit" disabled={busy || !subject.trim() || !details.trim()} className="gap-2">
                   <Send className="h-4 w-4" />
@@ -371,11 +389,11 @@ export function SupportPage() {
           <div className="mt-3 grid gap-3 sm:grid-cols-2 text-xs text-muted-foreground">
             <div>
               <p className="font-semibold text-foreground">Email Support</p>
-              <p className="font-mono mt-0.5">[OWNER ACTION REQUIRED: support@fleetwala.com]</p>
+              <p className="font-mono mt-0.5">[OWNER ACTION REQUIRED: configure support@fleetwala.app — mailbox not yet active]</p>
             </div>
             <div>
               <p className="font-semibold text-foreground">Grievance Officer</p>
-              <p className="font-mono mt-0.5">[OWNER ACTION REQUIRED: grievance@fleetwala.com]</p>
+              <p className="font-mono mt-0.5">[OWNER ACTION REQUIRED: configure grievance@fleetwala.app — mailbox not yet active]</p>
             </div>
           </div>
         </section>

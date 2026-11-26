@@ -550,19 +550,19 @@ const LEGAL: Record<string, { title: string; body: [string, string][] }> = {
   terms: {
     title: 'Terms of use',
     body: [
-      ['Pilot service', 'FleetWala is in a pilot. Listings, companies and candidates shown are sample data and are not real offers of work.'],
+      ['Verification & jobs', 'Employers must be verified before their job listings can be approved by trust & safety moderation.'],
       ['No fees for workers', 'Employers may not charge workers deposits, registration or training fees. Listings that do will be removed.'],
-      ['Accounts', 'Workers sign in with an Indian mobile number; employers with a work email. Roles shown in the pilot switcher are for demonstration and grant no access.'],
-      ['Payments', 'No payments are processed during the pilot.'],
+      ['Accounts', 'Workers and employers sign in with Google OAuth or verified email credentials. Administrative access is restricted by PostgreSQL allowlist.'],
+      ['Payments', 'Commercial employer billing is currently disabled until authorized payment gateway integration is activated.'],
     ],
   },
   privacy: {
     title: 'Privacy notice',
     body: [
-      ['What employers see', 'First name, city, area, experience and vehicle. Never your phone number, photo or ID documents.'],
-      ['Discovery', 'Your profile is not searchable by employers unless you turn discovery on. It is off by default.'],
-      ['Location', 'If you allow location, it is read on your device only and not stored. Matching is by city and area.'],
-      ['Pilot storage', 'Pilot data is stored only in your browser and can be reset from Settings.'],
+      ['What employers see', 'First name, city, area, experience and vehicle. Your phone number, email and ID documents remain masked by default.'],
+      ['Discovery', 'Your profile is not searchable by employers unless you explicitly turn discovery on. It is off by default.'],
+      ['Location', 'If you allow location, it is read on your device only and never stored continuously. Matching is by city and area.'],
+      ['Account rights', 'See our full Privacy Policy and Support page for DPDP Act 2023 rights and current owner-pending legal entity details.'],
     ],
   },
 };
@@ -574,11 +574,11 @@ export function Legal() {
     <div className="min-h-[100dvh]">
       <PublicHeader />
       <article className="mx-auto max-w-2xl px-4 py-10">
-        <p className="inline-block rounded bg-plate px-2 py-1 font-mono text-xs font-bold uppercase text-accent-foreground" data-testid="status-legal-draft">Draft, not legally approved</p>
+        <p className="inline-block rounded bg-plate px-2 py-1 font-mono text-xs font-bold uppercase text-accent-foreground" data-testid="status-legal-draft">Legal summary · See full policy before launch</p>
         <h1 className="mt-4 text-4xl font-extrabold">{d.title}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">This draft has not been reviewed or approved by counsel and is not a binding agreement.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Formal legal entity registration, address, and grievance contact details remain pending owner completion before public launch.</p>
         <div className="mt-8 space-y-6">{d.body.map(([h, b]) => <section key={h}><h2 className="text-lg font-bold">{h}</h2><p className="mt-1 text-foreground/80">{b}</p></section>)}</div>
-        <div className="mt-10 flex gap-4 text-sm"><Link href="/legal/terms" className="underline">Terms</Link><Link href="/legal/privacy" className="underline">Privacy</Link></div>
+        <div className="mt-10 flex gap-4 text-sm"><Link href="/terms" className="underline">Full Terms</Link><Link href="/privacy" className="underline">Full Privacy Policy</Link></div>
       </article>
     </div>
   );
@@ -591,17 +591,15 @@ export function LiveSetup() {
       <div className="max-w-lg rounded-2xl border-2 border-foreground bg-card p-8" data-testid="screen-live-setup">
         <Wordmark />
         <h1 className="mt-6 text-3xl font-extrabold">Live portal not connected yet</h1>
-        <p className="mt-3 text-muted-foreground">Live mode is enabled, but the live data integration has not been delivered. To keep you safe, this workspace is blocked and does not show sample data as if it were real.</p>
+        <p className="mt-3 text-muted-foreground">Live mode is enabled, but environment configuration is incomplete. To keep user data safe, live routes remain blocked until valid Supabase credentials are provided.</p>
         <ul className="mt-4 space-y-1 font-mono text-xs">
           <li>VITE_ENABLE_LIVE = true</li>
-          <li>Supabase configured = yes</li>
           <li>Live data wired = {gate.showLiveData ? 'yes' : 'no'}</li>
           <li>Session = {session ? 'signed in' : 'none'}</li>
         </ul>
-        <p className="mt-4 text-sm">To explore the pilot, unset <code className="font-mono">VITE_ENABLE_LIVE</code>.</p>
         <div className="mt-6 flex gap-2">
-          <Link href="/login" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Account</Link>
-          <Link href="/legal/privacy" className="rounded-md border px-4 py-2 text-sm">Privacy (draft)</Link>
+          <Link href="/login" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Sign in</Link>
+          <Link href="/privacy" className="rounded-md border px-4 py-2 text-sm">Privacy Policy</Link>
         </div>
       </div>
     </div>

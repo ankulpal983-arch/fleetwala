@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'wouter';
+import { useQueryClient } from '@tanstack/react-query';
 import { Check, FileClock, Gavel, LifeBuoy, Pause, ShieldOff, ShieldCheck, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,11 +14,14 @@ import { EmptyState, Monogram, PageHeader, Stat, StatusPill } from '@/components
 import { usePilot } from '@/lib/store';
 import { ago, istDate, istStamp, salaryRange } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { Employer, Job, TicketStatus } from '@/lib/types';
-import { liveMode, useSession } from '@/lib/supabase';
+import type { AuditEntry, Employer, Job, TicketStatus } from '@/lib/types';
+import { useSession } from '@/lib/supabase';
 import {
   checkIsLiveAdmin, reviewLiveJob, getLiveAdminJobs,
-  getLiveAdminEmployers, adminReviewLiveEmployer
+  getLiveAdminEmployers, adminReviewLiveEmployer,
+  adminSetLiveJobState, getLiveAdminAuditLog,
+  getLiveAdminSupportTickets, adminUpdateLiveSupportTicket,
+  type LiveSupportTicket,
 } from '@/lib/repo';
 
 const ACTOR = 'FleetWala Admin';
@@ -71,11 +75,15 @@ export function AdminOverview() {
   const { isAdmin, isLive } = useAdminAccess();
   const [liveJobs, setLiveJobs] = useState<Job[] | null>(null);
   const [liveEmployers, setLiveEmployers] = useState<Employer[] | null>(null);
+  const [liveAudit, setLiveAudit] = useState<AuditEntry[] | null>(null);
+  const [liveTickets, setLiveTickets] = useState<LiveSupportTicket[] | null>(null);
 
   useEffect(() => {
     if (isLive && isAdmin) {
       getLiveAdminJobs().then(setLiveJobs);
       getLiveAdminEmployers().then(setLiveEmployers);
+      getLiveAdminAuditLog().then(setLiveAudit);
+      getLiveAdminSupportTickets().then(setLiveTickets);
     }
   }, [isLive, isAdmin]);
 
@@ -85,6 +93,8 @@ export function AdminOverview() {
 
   const jobsSource = isLive ? (liveJobs ?? []) : state.jobs;
   const employersSource = isLive ? (liveEmployers ?? []) : state.employers;
+  const auditSource = isLive ? (liveAudit ?? []) : state.audit;
+  const ticketsSource = isLive ? (liveTickets ?? []) : state.tickets;
   const pending = jobsSource.filter((j) => j.status === 'pending');
 
   return (
@@ -94,8 +104,8 @@ export function AdminOverview() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Awaiting review" value={pending.length} hint="Jobs" testId="stat-pending" />
         <Stat label="Unverified employers" value={employersSource.filter((e) => e.status === 'unverified' || (e.status as string) === 'pending').length} />
-        <Stat label="Open tickets" value={state.tickets.filter((t) => t.status !== 'resolved').length} />
-        <Stat label="Audit events" value={state.audit.length} />
+        <Stat label="Open tickets" value={ticketsSource.filter((t) => t.status !== 'resolved' && t.status !== 'closed').length} />
+        <Stat label="Audit events" value={auditSource.length} />
       </div>
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <section className="rounded-2xl border bg-card p-5">
@@ -113,13 +123,14 @@ export function AdminOverview() {
         <section className="rounded-2xl border bg-card p-5">
           <div className="flex items-center justify-between"><h2 className="font-bold">Recent activity</h2><Link href="/admin/audit" className="text-sm text-primary underline">Audit log</Link></div>
           <ul className="mt-3 space-y-2 font-mono text-xs">
-            {state.audit.slice(0, 6).map((a) => (
+            {auditSource.slice(0, 6).map((a) => (
               <li key={a.id} className="flex gap-3">
                 <span className="text-muted-foreground">{istStamp(a.at)}</span>
                 <span className="font-bold">{a.action}</span>
                 <span className="truncate">{a.target}</span>
               </li>
             ))}
+            {auditSource.length === 0 && <li className="py-2 text-muted-foreground">No audit events recorded yet.</li>}
           </ul>
         </section>
       </div>
@@ -130,6 +141,7 @@ export function AdminOverview() {
 export function AdminJobs() {
   const { state, actions } = usePilot();
   const { isAdmin, isLive } = useAdminAccess();
+  const queryClient = useQueryClient();
   const { toast } = useToast();
   const [view, setView] = useState<'pending' | 'approved' | 'paused' | 'closed'>('pending');
   const [rejecting, setRejecting] = useState<Job | null>(null);
@@ -139,6 +151,7 @@ export function AdminJobs() {
   const refreshJobs = () => {
     if (isLive && isAdmin) {
       getLiveAdminJobs().then(setLiveJobs);
+      queryClient.invalidateQueries({ queryKey: ['live-jobs'] });
     }
   };
 
@@ -152,7 +165,7 @@ export function AdminJobs() {
 
   const jobsSource = isLive ? (liveJobs ?? []) : state.jobs;
   const list = jobsSource.filter((j) => j.status === view);
-  const empStatus = (id: string) => state.employers.find((e) => e.id === id)?.status ?? 'unverified';
+  const empStatus = (j: Job) => j.employer_status || state.employers.find((e) => e.id === j.employer_id)?.status || 'unverified';
 
   const handleApprove = async (j: Job) => {
     if (isLive) {
@@ -188,6 +201,20 @@ export function AdminJobs() {
     setRejecting(null);
   };
 
+  const handleAdminState = async (j: Job, nextState: 'paused' | 'closed', reason: string) => {
+    if (isLive) {
+      const res = await adminSetLiveJobState(j.id, nextState, reason);
+      if (!res.ok) {
+        toast({ title: 'State update failed', description: res.error, variant: 'destructive' });
+        return;
+      }
+      refreshJobs();
+      toast({ title: nextState === 'paused' ? 'Job paused' : 'Job closed', description: j.title });
+      return;
+    }
+    actions.setJobStatus(j.id, nextState, ACTOR, reason);
+  };
+
   return (
     <div>
       <PageHeader eyebrow="Trust & safety" title="Job moderation" description="Approve only listings with clear pay, no fees and a verified employer." />
@@ -206,7 +233,7 @@ export function AdminJobs() {
               <Monogram name={j.company} size="sm" />
               <div className="flex-1">
                 <p className="font-semibold">{j.title} <span className="font-normal text-muted-foreground">· {j.company}</span></p>
-                <p className="text-xs text-muted-foreground">{j.area}, {j.city} · {salaryRange(j)} · closes {istDate(j.expires_at)} · employer <StatusPill status={empStatus(j.employer_id)} /></p>
+                <p className="text-xs text-muted-foreground">{j.area}, {j.city} · {salaryRange(j)} · closes {istDate(j.expires_at)} · employer <StatusPill status={empStatus(j)} /></p>
                 <p className="mt-1 line-clamp-2 text-sm text-foreground/80">{j.description}</p>
                 {j.moderation_note && <p className="mt-1 text-xs font-semibold text-chart-4">{j.moderation_note}</p>}
               </div>
@@ -215,8 +242,8 @@ export function AdminJobs() {
                   <Button size="sm" variant="outline" onClick={() => { setRejecting(j); setNote(''); }} data-testid={`button-reject-${j.id}`}><X className="mr-1 h-4 w-4" />Send back</Button>
                   <Button size="sm" onClick={() => handleApprove(j)} data-testid={`button-approve-${j.id}`}><Check className="mr-1 h-4 w-4" />Approve</Button>
                 </>}
-                {j.status === 'approved' && <Button size="sm" variant="outline" onClick={() => actions.setJobStatus(j.id, 'paused', ACTOR, 'Paused by moderation')} data-testid={`button-admin-pause-${j.id}`}><Pause className="mr-1 h-4 w-4" />Pause</Button>}
-                {j.status === 'paused' && <Button size="sm" variant="outline" onClick={() => actions.setJobStatus(j.id, 'closed', ACTOR)} data-testid={`button-admin-close-${j.id}`}>Close</Button>}
+                {j.status === 'approved' && <Button size="sm" variant="outline" onClick={() => handleAdminState(j, 'paused', 'Paused by moderation')} data-testid={`button-admin-pause-${j.id}`}><Pause className="mr-1 h-4 w-4" />Pause</Button>}
+                {j.status === 'paused' && <Button size="sm" variant="outline" onClick={() => handleAdminState(j, 'closed', 'Closed by moderation')} data-testid={`button-admin-close-${j.id}`}>Close</Button>}
               </div>
             </article>
           ))}
@@ -324,17 +351,25 @@ export function AdminAudit() {
   const { state } = usePilot();
   const { isAdmin, isLive } = useAdminAccess();
   const [q, setQ] = useState('');
+  const [liveAudit, setLiveAudit] = useState<AuditEntry[] | null>(null);
+
+  useEffect(() => {
+    if (isLive && isAdmin) {
+      getLiveAdminAuditLog().then(setLiveAudit);
+    }
+  }, [isLive, isAdmin]);
 
   if (!isLive || isAdmin === false) {
     return <AdminAccessDenied />;
   }
 
-  const list = state.audit.filter((a) => `${a.actor} ${a.action} ${a.target}`.toLowerCase().includes(q.toLowerCase()));
+  const auditSource = isLive ? (liveAudit ?? []) : state.audit;
+  const list = auditSource.filter((a) => `${a.actor} ${a.action} ${a.target}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <div>
       <PageHeader eyebrow="Trust & safety" title="Audit log" description="Append-only record of system and administrative audit events."
         actions={<Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter" className="w-56" aria-label="Filter audit log" data-testid="input-audit-filter" />} />
-      {list.length === 0 ? <EmptyState icon={FileClock} title="No matching events" body="Try a different filter." /> : (
+      {list.length === 0 ? <EmptyState icon={FileClock} title="No matching events" body={auditSource.length === 0 ? 'No audit events recorded yet.' : 'Try a different filter.'} /> : (
         <div className="overflow-hidden rounded-xl border bg-tarmac font-mono text-xs text-sidebar-foreground">
           {list.map((a) => (
             <div key={a.id} className="grid grid-cols-[120px_1fr] gap-2 border-b border-sidebar-border px-4 py-2.5 md:grid-cols-[150px_140px_160px_1fr]" data-testid={`row-audit-${a.id}`}>
@@ -353,22 +388,52 @@ export function AdminAudit() {
 export function AdminSupport() {
   const { state, actions } = usePilot();
   const { isAdmin, isLive } = useAdminAccess();
+  const { toast } = useToast();
+  const [liveTickets, setLiveTickets] = useState<LiveSupportTicket[] | null>(null);
+
+  const refreshTickets = () => {
+    if (isLive && isAdmin) {
+      getLiveAdminSupportTickets().then(setLiveTickets);
+    }
+  };
+
+  useEffect(() => {
+    refreshTickets();
+  }, [isLive, isAdmin]);
 
   if (!isLive || isAdmin === false) {
     return <AdminAccessDenied />;
   }
 
+  const handleStatusChange = async (id: string, nextStatus: TicketStatus) => {
+    if (isLive) {
+      const res = await adminUpdateLiveSupportTicket(id, nextStatus);
+      if (!res.ok) {
+        toast({ title: 'Could not update ticket', description: res.error, variant: 'destructive' });
+        return;
+      }
+      refreshTickets();
+      toast({ title: 'Ticket status updated', description: `Marked ${nextStatus.replace('_', ' ')}` });
+      return;
+    }
+    actions.setTicketStatus(id, nextStatus);
+  };
+
+  const ticketsSource = isLive
+    ? (liveTickets ?? []).map((t) => ({ ...t, from: 'user' as const }))
+    : state.tickets;
+
   return (
     <div>
       <PageHeader eyebrow="Trust & safety" title="Support queue" description="Safety reports first." />
       <AdminNote />
-      {state.tickets.length === 0 ? <EmptyState icon={LifeBuoy} title="Inbox zero" body="No support requests." /> : (
+      {ticketsSource.length === 0 ? <EmptyState icon={LifeBuoy} title="Inbox zero" body="No support requests." /> : (
         <div className="space-y-3">
-          {[...state.tickets].sort((a, b) => Number(b.topic === 'Safety') - Number(a.topic === 'Safety')).map((t) => (
-            <article key={t.id} className={cn('rounded-xl border bg-card p-4', t.topic === 'Safety' && t.status !== 'resolved' && 'border-l-4 border-l-chart-4')} data-testid={`card-ticket-${t.id}`}>
+          {[...ticketsSource].sort((a, b) => Number(/safety|scam/i.test(b.topic)) - Number(/safety|scam/i.test(a.topic))).map((t) => (
+            <article key={t.id} className={cn('rounded-xl border bg-card p-4', /safety|scam/i.test(t.topic) && t.status !== 'resolved' && 'border-l-4 border-l-chart-4')} data-testid={`card-ticket-${t.id}`}>
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div><p className="font-semibold">{t.subject}</p><p className="text-xs text-muted-foreground">{t.topic} · from {t.from} · {ago(t.created_at)}</p><p className="mt-2 text-sm">{t.body}</p></div>
-                <Select value={t.status} onValueChange={(v) => actions.setTicketStatus(t.id, v as TicketStatus)}>
+                <Select value={t.status === 'closed' ? 'resolved' : t.status} onValueChange={(v) => handleStatusChange(t.id, v as TicketStatus)}>
                   <SelectTrigger className="w-40" data-testid={`select-ticket-status-${t.id}`}><SelectValue /></SelectTrigger>
                   <SelectContent><SelectItem value="open">Open</SelectItem><SelectItem value="in_progress">In progress</SelectItem><SelectItem value="resolved">Resolved</SelectItem></SelectContent>
                 </Select>

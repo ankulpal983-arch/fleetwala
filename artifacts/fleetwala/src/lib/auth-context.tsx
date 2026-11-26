@@ -1,9 +1,11 @@
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 import { useLocation } from 'wouter';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Session, User } from '@supabase/supabase-js';
 import { getSupabase, signOut, supabaseConfigured } from './supabase';
 import { resolveUserRoleStatus, type UserRoleStatus } from './repo';
+
+export const SESSION_RESET_EVENT = 'fleetwala:session-reset';
 
 export interface AuthContextValue {
   session: Session | null;
@@ -34,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(!supabaseConfigured);
   const [authError, setAuthError] = useState<string | null>(null);
   const [roleStatus, setRoleStatus] = useState<UserRoleStatus>(defaultRoleStatus);
+  const lastUserIdRef = useRef<string | null>(null);
 
   const refreshRole = useCallback(async (): Promise<UserRoleStatus> => {
     try {
@@ -47,16 +50,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const testAuth = typeof window !== 'undefined' ? localStorage.getItem('fleetwala_test_auth') : null;
-    if (testAuth === 'employer') {
-      const mockSession = { user: { id: '2480d144-2f7d-44dd-81d3-567d7d6d47d4', email: 'palm39950@gmail.com' } } as any;
-      setSession(mockSession);
-      setStatus('authenticated');
-      setRoleStatus({ role: 'employer', onboarded: true, isAdmin: false, isEmployer: true, isWorker: false, employerOrg: { id: 'af42f70c-6b4f-48da-9cf4-d2707543602d', legal_name: 'flipkart', employer_type: 'company', verification_state: 'verified' } });
-      setReady(true);
-      return;
-    }
-
     const c = getSupabase();
     if (!c) {
       setReady(true);
@@ -84,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSession(null);
           setStatus('error');
         } else {
+          lastUserIdRef.current = data.session?.user?.id ?? null;
           setSession(data.session);
           setStatus(data.session ? 'authenticated' : 'unauthenticated');
           if (data.session) {
@@ -103,14 +97,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: authSub } = c.auth.onAuthStateChange(async (event, s) => {
       if (!isMounted) return;
+      const nextUid = s?.user?.id ?? null;
+      const userChanged = lastUserIdRef.current !== null && lastUserIdRef.current !== nextUid;
+      lastUserIdRef.current = nextUid;
       setSession(s);
       setStatus(s ? 'authenticated' : 'unauthenticated');
       setReady(true);
 
-      if (event === 'SIGNED_OUT') {
+      if (event === 'SIGNED_OUT' || userChanged) {
         queryClient.clear();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event(SESSION_RESET_EVENT));
+        }
         setRoleStatus(defaultRoleStatus);
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+      }
+
+      if (s && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED')) {
         queryClient.invalidateQueries();
         await refreshRole();
       }
@@ -124,10 +126,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshRole, queryClient]);
 
   const logout = useCallback(async () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('fleetwala_test_auth');
-    }
+    lastUserIdRef.current = null;
     queryClient.clear();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(SESSION_RESET_EVENT));
+    }
+    setAuthError(null);
     setSession(null);
     setStatus('unauthenticated');
     setRoleStatus(defaultRoleStatus);

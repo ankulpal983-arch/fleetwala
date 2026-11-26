@@ -9,8 +9,11 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { useQuery } from '@tanstack/react-query';
 import { usePilot } from '@/lib/store';
 import { useAuth } from '@/lib/auth-context';
+import { liveMode } from '@/lib/supabase';
+import { getLiveNotifications } from '@/lib/repo';
 import { cn } from '@/lib/utils';
 
 export type Workspace = 'worker' | 'employer' | 'admin';
@@ -81,7 +84,15 @@ export function Shell({ children }: { children: ReactNode }) {
   const [loc, navigate] = useLocation();
   const { state, online } = usePilot();
   const { session, user, roleStatus, logout } = useAuth();
-  const unread = state.notifications.filter((n) => !n.read).length;
+  const { data: liveNotices } = useQuery({
+    queryKey: ['notifications-list', user?.id],
+    enabled: Boolean(liveMode && session && user?.id),
+    queryFn: () => getLiveNotifications(),
+    staleTime: 30_000,
+  });
+  const unread = liveMode && session
+    ? (liveNotices ?? []).filter((n) => !n.read).length
+    : state.notifications.filter((n) => !n.read).length;
 
   // Determine user's primary workspace based on verified role
   const userPrimaryWorkspace: Workspace = roleStatus.isAdmin

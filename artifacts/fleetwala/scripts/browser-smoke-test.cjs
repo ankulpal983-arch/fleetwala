@@ -4,14 +4,14 @@ const fs = require('fs');
 const path = require('path');
 
 const routesToTest = [
-  { url: 'http://localhost:3000/', name: 'homepage', expectedText: 'Find local jobs' },
+  { url: 'http://localhost:3000/', name: 'homepage', expectedText: 'jobs open' },
   { url: 'http://localhost:3000/welcome', name: 'welcome', expectedText: 'Local work' },
-  { url: 'http://localhost:3000/login', name: 'login', expectedText: 'Sign in to FleetWala' },
-  { url: 'http://localhost:3000/signup', name: 'signup', expectedText: 'Join FleetWala' },
+  { url: 'http://localhost:3000/login', name: 'login', expectedText: 'Verified Logistics Identity Network' },
+  { url: 'http://localhost:3000/signup', name: 'signup', expectedText: 'Create your FleetWala account' },
   { url: 'http://localhost:3000/verify-email', name: 'verify-email', expectedText: 'Check your email' },
   { url: 'http://localhost:3000/forgot-password', name: 'forgot-password', expectedText: 'Reset your password' },
-  { url: 'http://localhost:3000/onboarding/worker', name: 'onboarding-worker', expectedText: 'Worker Profile' },
-  { url: 'http://localhost:3000/onboarding/employer', name: 'onboarding-employer', expectedText: 'Register Company' },
+  { url: 'http://localhost:3000/onboarding/worker', name: 'onboarding-worker', expectedText: 'Location & Vehicle' },
+  { url: 'http://localhost:3000/onboarding/employer', name: 'onboarding-employer', expectedText: 'Set up your employer workspace' },
   { url: 'http://localhost:3000/employer', name: 'employer-dashboard', expectedText: 'Employer Workspace' },
   { url: 'http://localhost:3000/employer/candidates', name: 'employer-candidates-guard', expectedText: 'Employer Workspace' },
   { url: 'http://localhost:3000/admin', name: 'admin-portal', expectedText: 'Administrator Access Denied' },
@@ -113,16 +113,19 @@ async function runTestSuite() {
     currentErrors = [];
     console.log(`\nNavigating to ${item.name} (${item.url})...`);
     await send('Page.navigate', { url: item.url });
-    await new Promise(r => setTimeout(r, 1500));
-
-    const titleRes = await send('Runtime.evaluate', { expression: 'document.title' });
-    const title = titleRes?.result?.value || '';
-
-    const bodyRes = await send('Runtime.evaluate', { expression: 'document.body.innerText' });
-    const innerText = bodyRes?.result?.value || '';
-
-    const htmlRes = await send('Runtime.evaluate', { expression: 'document.getElementById("root")?.innerHTML || ""' });
-    const htmlLen = (htmlRes?.result?.value || '').length;
+    let title = '';
+    let innerText = '';
+    let htmlLen = 0;
+    for (let w = 0; w < 20; w++) {
+      await new Promise(r => setTimeout(r, 400));
+      const titleRes = await send('Runtime.evaluate', { expression: 'document.title' });
+      title = titleRes?.result?.value || '';
+      const bodyRes = await send('Runtime.evaluate', { expression: 'document.body.innerText' });
+      innerText = bodyRes?.result?.value || '';
+      const htmlRes = await send('Runtime.evaluate', { expression: 'document.getElementById("root")?.innerHTML || ""' });
+      htmlLen = (htmlRes?.result?.value || '').length;
+      if (innerText.toLowerCase().includes(item.expectedText.toLowerCase()) || currentErrors.length > 0) break;
+    }
 
     // Capture screenshot
     const ss = await send('Page.captureScreenshot', { format: 'png' });
@@ -131,7 +134,7 @@ async function runTestSuite() {
     }
 
     const hasExpected = innerText.toLowerCase().includes(item.expectedText.toLowerCase());
-    const pass = htmlLen > 200 && currentErrors.length === 0;
+    const pass = htmlLen > 200 && hasExpected && currentErrors.length === 0;
 
     results.push({
       route: item.url,
@@ -149,10 +152,9 @@ async function runTestSuite() {
     }
   }
 
-  // Dedicated regression test: Authenticated Employer Candidate Discovery
-  console.log('\nNavigating to authenticated employer candidate discovery (http://localhost:3000/employer/candidates)...');
+  // Dedicated regression test: Unauthenticated Employer Candidate Discovery route guard
+  console.log('\nNavigating to guarded employer candidate discovery (http://localhost:3000/employer/candidates)...');
   currentErrors = [];
-  await send('Runtime.evaluate', { expression: "localStorage.setItem('fleetwala_test_auth', 'employer')" });
   await send('Page.navigate', { url: 'http://localhost:3000/employer/candidates' });
   await new Promise(r => setTimeout(r, 2000));
 
@@ -165,26 +167,21 @@ async function runTestSuite() {
   const authHtmlRes = await send('Runtime.evaluate', { expression: 'document.getElementById("root")?.innerHTML || ""' });
   const authHtmlLen = (authHtmlRes?.result?.value || '').length;
 
-  const hasFindCandidates = authInnerText.includes('Find Candidates');
-  const hasPrivacy = authInnerText.includes('Privacy Protection');
-  const hasMaskedBadge = authInnerText.includes('Masked ID');
+  const hasGuardHeading = authInnerText.includes('Employer Workspace Required');
   const hasNoError = currentErrors.length === 0 && !authInnerText.includes('Something went wrong') && !authInnerText.includes('ShieldCheck is not defined');
-  const authCandidatePass = authHtmlLen > 500 && hasFindCandidates && hasPrivacy && hasNoError;
+  const authCandidatePass = authHtmlLen > 300 && hasGuardHeading && hasNoError;
 
   const ssAuth = await send('Page.captureScreenshot', { format: 'png' });
   if (ssAuth?.data) {
-    fs.writeFileSync(path.join(screenshotsDir, 'employer-candidates-rendered.png'), Buffer.from(ssAuth.data, 'base64'));
+    fs.writeFileSync(path.join(screenshotsDir, 'employer-candidates-guard.png'), Buffer.from(ssAuth.data, 'base64'));
   }
 
-  // Cleanup test auth
-  await send('Runtime.evaluate', { expression: "localStorage.removeItem('fleetwala_test_auth')" });
-
   results.push({
-    route: 'http://localhost:3000/employer/candidates [Auth]',
-    name: 'employer-candidates-auth',
+    route: 'http://localhost:3000/employer/candidates [Guard]',
+    name: 'employer-candidates-guard-check',
     title: authTitle,
     htmlLen: authHtmlLen,
-    hasExpected: hasFindCandidates && hasPrivacy,
+    hasExpected: hasGuardHeading,
     errors: currentErrors.slice(),
     status: authCandidatePass ? 'PASS' : 'FAIL'
   });

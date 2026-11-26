@@ -23,6 +23,7 @@ export interface Job {
   expires_at: string;
   created_at: string;
   moderation_note?: string;
+  employer_status?: EmployerStatus | string;
 }
 
 export interface Application {
@@ -32,6 +33,10 @@ export interface Application {
   status: AppStatus;
   created_at: string;
   history: { status: AppStatus; at: string }[];
+  company?: string;
+  job_title?: string;
+  area?: string;
+  city?: string;
 }
 
 export interface WorkerProfile {

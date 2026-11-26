@@ -106,3 +106,65 @@ export function isAllowedRegistrationRole(role: string): boolean {
   return (ALLOWED_REGISTRATION_ROLES as readonly string[]).includes(role);
 }
 
+/** Supported Indian city hub reference coordinates for approximate on-device matching only. */
+export const CITY_CENTROIDS: Record<string, { lat: number; lng: number }> = {
+  Bengaluru: { lat: 12.9716, lng: 77.5946 },
+  Mumbai: { lat: 19.076, lng: 72.8777 },
+  'Delhi NCR': { lat: 28.6139, lng: 77.209 },
+  Hyderabad: { lat: 17.385, lng: 78.4867 },
+  Pune: { lat: 18.5204, lng: 73.8567 },
+  Chennai: { lat: 13.0827, lng: 80.2707 },
+};
+
+export function isValidCoordinate(lat: number, lng: number): boolean {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180 &&
+    !(lat === 0 && lng === 0)
+  );
+}
+
+export function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  if (!isValidCoordinate(a.lat, a.lng) || !isValidCoordinate(b.lat, b.lng)) return Number.POSITIVE_INFINITY;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h =
+    sinLat * sinLat +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sinLng * sinLng;
+  return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+export function findNearestSupportedCity(
+  lat: number,
+  lng: number,
+  maxKm = DEFAULT_RADIUS_KM
+): { city: string; distanceKm: number; withinRadius: boolean } | null {
+  if (!isValidCoordinate(lat, lng)) return null;
+  let best: { city: string; distanceKm: number } | null = null;
+  for (const [city, center] of Object.entries(CITY_CENTROIDS)) {
+    const distanceKm = haversineKm({ lat, lng }, center);
+    if (!best || distanceKm < best.distanceKm) {
+      best = { city, distanceKm };
+    }
+  }
+  if (!best) return null;
+  return {
+    city: best.city,
+    distanceKm: Math.round(best.distanceKm),
+    withinRadius: best.distanceKm <= maxKm,
+  };
+}
+
+export function normalizeIndianPincode(input: string): string | null {
+  const digits = input.replace(/\D/g, '');
+  return /^[1-9]\d{5}$/.test(digits) ? digits : null;
+}
+

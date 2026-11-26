@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { makeEmptyState } from './fixtures';
 import { uid } from './format';
 import { DAILY_LIMIT, canApplyToday, countToday, isLiveJob } from './rules';
+import { SESSION_RESET_EVENT } from './auth-context';
 import type {
   AppStatus, EmployerStatus, Job, JobStatus, PilotState, Prefs, TeamMember, Ticket, TicketStatus, WorkerProfile,
 } from './types';
@@ -73,11 +74,22 @@ export function PilotProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const on = () => setOnline(true);
     const off = () => setOnline(false);
+    const onSessionReset = () => {
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        /* ignore storage error */
+      }
+      setState(makeEmptyState());
+      setLoadError(false);
+    };
     window.addEventListener('online', on);
     window.addEventListener('offline', off);
+    window.addEventListener(SESSION_RESET_EVENT, onSessionReset);
     return () => {
       window.removeEventListener('online', on);
       window.removeEventListener('offline', off);
+      window.removeEventListener(SESSION_RESET_EVENT, onSessionReset);
     };
   }, []);
 

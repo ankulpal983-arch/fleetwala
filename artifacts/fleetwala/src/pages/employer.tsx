@@ -133,7 +133,7 @@ export function EmployerOverview() {
         <Stat label="Live jobs" value={jobs.filter((j) => j.status === 'approved').length} hint={`${jobs.filter((j) => j.status === 'pending').length} awaiting review`} testId="stat-live-jobs" />
         <Stat label="New applicants" value={by('applied')} hint="Not yet viewed" />
         <Stat label="Shortlisted" value={by('shortlisted')} />
-        <Stat label="Hired" value={by('hired')} hint={isLive ? "Live" : "This pilot"} />
+        <Stat label="Hired" value={by('hired')} hint={isLive ? "Live" : "Confirmed"} />
       </div>
       <div className="mt-6 grid gap-6 lg:grid-cols-[1.3fr_1fr]">
         <section className="rounded-2xl border bg-card p-5">
@@ -155,7 +155,7 @@ export function EmployerOverview() {
               <li key={a.id} className="flex items-center justify-between py-2.5">
                 <span>
                   <span className="font-mono font-semibold">
-                    {'candidate_code' in a ? (a as any).candidate_code : (a.candidate_id === 'me' ? 'Pilot worker' : a.candidate_id.toUpperCase())}
+                    {'candidate_code' in a ? (a as any).candidate_code : (a.candidate_id === 'me' ? 'Worker' : a.candidate_id.toUpperCase())}
                   </span>
                   <span className="block text-xs text-muted-foreground">
                     {'job_title' in a ? (a as any).job_title : jobs.find((j) => j.id === a.job_id)?.title}
@@ -298,7 +298,7 @@ function JobDialog({ open, onOpenChange, job, orgId, orgName, onSuccess }: { ope
       if (submit) actions.setJobStatus(id, 'pending', companyName);
       toast({
         title: submit ? 'Submitted for review' : 'Draft saved',
-        description: submit ? 'A pilot admin can approve it under Admin > Job moderation.' : v.title,
+        description: submit ? 'An administrator will review it in the moderation queue.' : v.title,
       });
       onOpenChange(false);
       if (onSuccess) onSuccess();
@@ -548,13 +548,15 @@ export function EmployerJobs() {
                       {j.status === 'draft' && <>
                         <Button size="sm" variant="ghost" onClick={() => { setEditing(j); setOpen(true); }} aria-label="Edit" data-testid={`button-edit-${j.id}`}><Pencil className="h-4 w-4" /></Button>
                         <Button size="sm" onClick={() => act(j, 'pending', 'Submitted for review')} data-testid={`button-submit-${j.id}`}>Submit</Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild><Button size="sm" variant="ghost" aria-label="Delete draft" data-testid={`button-delete-${j.id}`}><Trash2 className="h-4 w-4 text-destructive" /></Button></AlertDialogTrigger>
-                          <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Delete this draft?</AlertDialogTitle><AlertDialogDescription>{j.title} will be removed.</AlertDialogDescription></AlertDialogHeader>
-                            <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => actions.deleteJob(j.id)} data-testid="button-confirm-delete">Delete</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
-                        </AlertDialog>
+                        {!isLive && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild><Button size="sm" variant="ghost" aria-label="Delete draft" data-testid={`button-delete-${j.id}`}><Trash2 className="h-4 w-4 text-destructive" /></Button></AlertDialogTrigger>
+                            <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Delete this draft?</AlertDialogTitle><AlertDialogDescription>{j.title} will be removed.</AlertDialogDescription></AlertDialogHeader>
+                              <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => actions.deleteJob(j.id)} data-testid="button-confirm-delete">Delete</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
+                          </AlertDialog>
+                        )}
                       </>}
-                      {j.status === 'pending' && <Button size="sm" variant="outline" onClick={() => act(j, 'draft', 'Moved back to draft')} data-testid={`button-recall-${j.id}`}>Recall</Button>}
+                      {j.status === 'pending' && !isLive && <Button size="sm" variant="outline" onClick={() => act(j, 'draft', 'Moved back to draft')} data-testid={`button-recall-${j.id}`}>Recall</Button>}
                       {j.status === 'approved' && <Button size="sm" variant="outline" onClick={() => act(j, 'paused', 'Paused')} data-testid={`button-pause-${j.id}`}><Pause className="mr-1 h-3.5 w-3.5" />Pause</Button>}
                       {j.status === 'paused' && <Button size="sm" variant="outline" onClick={() => act(j, 'approved', 'Resumed')} data-testid={`button-resume-${j.id}`}><Play className="mr-1 h-3.5 w-3.5" />Resume</Button>}
                       {(j.status === 'approved' || j.status === 'paused') && <Button size="sm" variant="ghost" onClick={() => act(j, 'closed', 'Closed')} data-testid={`button-close-${j.id}`}><XCircle className="mr-1 h-3.5 w-3.5" />Close</Button>}
@@ -614,7 +616,7 @@ export function EmployerApplicants() {
             <TableBody>
               {list.map((a) => {
                 const isLiveApp = 'candidate_code' in a;
-                const label = isLiveApp ? (a as any).candidate_code : (state.candidates.find((x) => x.id === a.candidate_id)?.code || 'FW-PILOT');
+                const label = isLiveApp ? (a as any).candidate_code : (state.candidates.find((x) => x.id === a.candidate_id)?.code || 'FW-APPLICANT');
                 const detail = isLiveApp
                   ? (a as any).worker_summary
                   : (state.candidates.find((x) => x.id === a.candidate_id)
@@ -1095,20 +1097,35 @@ type InviteForm = z.infer<typeof inviteSchema>;
 
 export function EmployerTeam() {
   const { state, actions } = usePilot();
-  const { orgName } = useEmployer();
+  const { orgName, isLive } = useEmployer();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const form = useForm<InviteForm>({ resolver: zodResolver(inviteSchema), defaultValues: { name: '', role: 'Recruiter' } });
   const submit = (v: InviteForm) => {
+    if (isLive) {
+      toast({
+        title: 'Multi-seat invites unavailable yet',
+        description: 'Organization seat invitations require verified email delivery (Custom SMTP) before activation.',
+        variant: 'destructive',
+      });
+      setOpen(false);
+      return;
+    }
     actions.inviteMember(v.name, v.role as TeamMember['role']);
-    toast({ title: 'Invite recorded', description: 'No email is sent in the pilot.' });
+    toast({ title: 'Invite recorded', description: `${v.name} added as ${v.role}.` });
     form.reset(); setOpen(false);
   };
   return (
     <div className="max-w-3xl">
       <PageHeader eyebrow={`${orgName} · employer`} title="Team" description="Manage recruiting collaborators and hiring managers for your organization."
-        actions={<Button onClick={() => setOpen(true)} data-testid="button-invite-member"><UserPlus className="mr-1.5 h-4 w-4" />Invite</Button>} />
-      {state.team.length === 0 ? <EmptyState icon={Users} title="No teammates" body="Invite a recruiter to help review applicants." /> : (
+        actions={!isLive ? <Button onClick={() => setOpen(true)} data-testid="button-invite-member"><UserPlus className="mr-1.5 h-4 w-4" />Invite</Button> : undefined} />
+      {isLive ? (
+        <EmptyState
+          icon={Users}
+          title="Single-owner organization active"
+          body="Your verified employer owner membership is active. Additional recruiter seat invitations will be enabled once Custom SMTP is configured."
+        />
+      ) : state.team.length === 0 ? <EmptyState icon={Users} title="No teammates" body="Invite a recruiter to help review applicants." /> : (
         <ul className="divide-y rounded-xl border bg-card">
           {state.team.map((m) => (
             <li key={m.id} className="flex items-center gap-3 p-4" data-testid={`row-member-${m.id}`}>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'wouter';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, Bookmark, BookmarkCheck, Crosshair, EyeOff, Fuel, IdCard, LocateFixed, MapPin, Search, SearchX, ShieldCheck, SlidersHorizontal, WifiOff, X,
 } from 'lucide-react';
@@ -19,34 +20,78 @@ import { JobCard } from '@/components/job-card';
 import { CardSkeleton, EmptyState, Meter, Monogram, SampleTag, StatusPill } from '@/components/common';
 import { CATEGORIES, CITIES, CITY_NAMES } from '@/lib/fixtures';
 import { DAILY_LIMIT, profileProgress, usePilot } from '@/lib/store';
-import { DEFAULT_RADIUS_KM, isLiveJob, liveJobs } from '@/lib/rules';
+import { DEFAULT_RADIUS_KM, findNearestSupportedCity, isLiveJob, isValidCoordinate, istDay, liveJobs, normalizeIndianPincode } from '@/lib/rules';
 import { ago, daysLeft, istDate, salaryRange } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { Application, Job, JobStatus } from '@/lib/types';
-import { liveMode, useSession, getSupabase } from '@/lib/supabase';
-import { getLiveJobs, applyToLiveJob, getLiveSavedJobs, toggleLiveSavedJob } from '@/lib/repo';
+import type { Application, Job } from '@/lib/types';
+import { liveMode, useSession } from '@/lib/supabase';
+import {
+  getLiveJobs, applyToLiveJob, getLiveSavedJobs, toggleLiveSavedJob,
+  getLiveWorkerProfile, getLiveApplications,
+} from '@/lib/repo';
 
 type Sort = 'newest' | 'salary' | 'expiring';
 
-function useMyApps() {
-  const { state } = usePilot();
-  return useMemo(() => {
+function useWorkerLiveState() {
+  const { state, usageToday: pilotUsage } = usePilot();
+  const { session } = useSession();
+  const uid = session?.user?.id ?? null;
+  const activeLive = Boolean(liveMode && uid);
+
+  const { data: liveProfile } = useQuery({
+    queryKey: ['worker-profile', uid],
+    enabled: activeLive,
+    queryFn: () => getLiveWorkerProfile(),
+    staleTime: 60_000,
+  });
+
+  const { data: liveApps } = useQuery({
+    queryKey: ['worker-applications', uid],
+    enabled: activeLive,
+    queryFn: () => getLiveApplications(),
+    staleTime: 30_000,
+  });
+
+  const { data: liveSaved } = useQuery({
+    queryKey: ['worker-saved-jobs', uid],
+    enabled: activeLive,
+    queryFn: () => getLiveSavedJobs(),
+    staleTime: 30_000,
+  });
+
+  const appsMap = useMemo(() => {
     const m = new Map<string, Application>();
-    state.applications.filter((a) => a.candidate_id === 'me' && a.status !== 'withdrawn').forEach((a) => m.set(a.job_id, a));
+    const list = activeLive ? (liveApps ?? []) : state.applications.filter((a) => a.candidate_id === 'me');
+    list.filter((a) => a.status !== 'withdrawn').forEach((a) => m.set(a.job_id, a));
     return m;
-  }, [state.applications]);
+  }, [activeLive, liveApps, state.applications]);
+
+  const usageToday = useMemo(() => {
+    if (!activeLive) return pilotUsage;
+    const today = istDay(new Date());
+    return (liveApps ?? []).filter((a) => istDay(a.created_at) === today).length;
+  }, [activeLive, liveApps, pilotUsage]);
+
+  return {
+    activeLive,
+    uid,
+    profile: activeLive ? (liveProfile ?? state.profile) : state.profile,
+    liveProfileLoaded: Boolean(liveProfile),
+    appsMap,
+    savedIds: activeLive ? (liveSaved ?? []) : state.saved,
+    usageToday,
+  };
 }
 
 export function FindJobs() {
-  const { state, actions, usageToday, online } = usePilot();
+  const { state, actions, online } = usePilot();
   const { session } = useSession();
-  const [liveDbJobs, setLiveDbJobs] = useState<Job[] | null>(null);
+  const queryClient = useQueryClient();
   const { toast } = useToast();
-  const p = state.profile;
-  const myApps = useMyApps();
-  const [loading, setLoading] = useState(true);
+  const { activeLive, uid, profile: p, liveProfileLoaded, appsMap: myApps, savedIds, usageToday } = useWorkerLiveState();
   const [q, setQ] = useState('');
   const [city, setCity] = useState(p.city || 'Bengaluru');
+  const [cityTouched, setCityTouched] = useState(false);
   const [area, setArea] = useState('any');
   const [radius, setRadius] = useState(String(DEFAULT_RADIUS_KM));
   const [cats, setCats] = useState<string[]>([]);
@@ -58,41 +103,33 @@ export function FindJobs() {
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
-    let active = true;
-    if (liveMode) {
-      setLoading(true);
-      getLiveJobs()
-        .then((data) => {
-          if (!active) return;
-          setLiveDbJobs(data ?? []);
-          setLoading(false);
-        })
-        .catch(() => {
-          if (!active) return;
-          setLoading(false);
-        });
-      return () => { active = false; };
+    if (liveProfileLoaded && p.city && !cityTouched && CITY_NAMES.includes(p.city)) {
+      setCity(p.city);
     }
-    const t = setTimeout(() => {
-      if (active) setLoading(false);
-    }, 250);
-    return () => {
-      active = false;
-      clearTimeout(t);
-    };
-  }, [session]);
+  }, [liveProfileLoaded, p.city, cityTouched]);
 
+  const { data: liveDbJobs, isLoading: liveJobsLoading } = useQuery({
+    queryKey: ['live-jobs'],
+    enabled: liveMode,
+    queryFn: () => getLiveJobs(),
+    staleTime: 30_000,
+  });
+
+  const loading = liveMode ? liveJobsLoading : false;
   const baseJobs = liveMode ? (liveDbJobs ?? []) : state.jobs;
 
   const jobs = useMemo(() => {
     const term = q.trim().toLowerCase();
+    const pincode = normalizeIndianPincode(term);
     const list = liveJobs(baseJobs).filter((j) =>
       j.city === city &&
       (area === 'any' || j.area === area) &&
       (cats.length === 0 || cats.includes(j.category)) &&
       (!fuelOnly || j.fuel_allowance) &&
       (!noLicence || !j.licence_required) &&
-      (!term || `${j.title} ${j.company} ${j.area} ${j.category}`.toLowerCase().includes(term)));
+      (!term ||
+        `${j.title} ${j.company} ${j.area} ${j.city} ${j.category}`.toLowerCase().includes(term) ||
+        (pincode ? `${j.area} ${j.description}`.includes(pincode) : false)));
     return list.sort((a, b) =>
       sort === 'salary' ? b.max_salary - a.max_salary
         : sort === 'expiring' ? +new Date(a.expires_at) - +new Date(b.expires_at)
@@ -102,8 +139,6 @@ export function FindJobs() {
   const prog = profileProgress(p);
   const activeFilters = cats.length + (fuelOnly ? 1 : 0) + (noLicence ? 1 : 0) + (area !== 'any' ? 1 : 0);
   const clear = () => { setCats([]); setFuelOnly(false); setNoLicence(false); setArea('any'); setQ(''); };
-
-  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   const requestGps = () => {
     setGpsOpen(false);
@@ -115,14 +150,36 @@ export function FindJobs() {
       (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        setUserCoords({ lat, lng });
-        setGpsNote(`Location detected (${lat.toFixed(2)}°, ${lng.toFixed(2)}°). Showing nearby logistics jobs within ${radius} km.`);
+        if (!isValidCoordinate(lat, lng)) {
+          setGpsNote('Received invalid location coordinates. Choose your city or area manually.');
+          return;
+        }
+        const nearest = findNearestSupportedCity(lat, lng, Number(radius) || DEFAULT_RADIUS_KM);
+        if (nearest) {
+          if (CITY_NAMES.includes(nearest.city)) {
+            setCity(nearest.city);
+            setCityTouched(true);
+            setArea('any');
+          }
+          setGpsNote(
+            nearest.withinRadius
+              ? `On-device city hub match: ${nearest.city} (~${nearest.distanceKm} km from hub center; within ${radius} km). Choose your exact area below.`
+              : `Location checked on-device: nearest hub is ${nearest.city} (~${nearest.distanceKm} km away). Select your city or area manually.`
+          );
+        } else {
+          setGpsNote('Location checked on-device. Choose your city and area manually below.');
+        }
       },
-      () => {
-        setUserCoords(null);
-        setGpsNote('Location permission is disabled. Choose your city or area manually.');
+      (err) => {
+        if (err.code === 1) {
+          setGpsNote('Location permission denied. Your coordinates are not stored — choose your city or area manually.');
+        } else if (err.code === 3) {
+          setGpsNote('Location request timed out. Choose your city or area manually.');
+        } else {
+          setGpsNote('Location unavailable on this device. Choose your city or area manually.');
+        }
       },
-      { timeout: 10000, enableHighAccuracy: true, maximumAge: 60000 },
+      { timeout: 10000, enableHighAccuracy: false, maximumAge: 60000 },
     );
   };
 
@@ -172,7 +229,7 @@ export function FindJobs() {
               {jobs.length} jobs open<br /><span className="text-plate">around {area === 'any' ? city : area}</span>
             </h1>
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <Select value={city} onValueChange={(v) => { setCity(v); setArea('any'); }}>
+              <Select value={city} onValueChange={(v) => { setCity(v); setCityTouched(true); setArea('any'); }}>
                 <SelectTrigger className="h-9 w-auto gap-2 border-sidebar-border bg-sidebar-accent text-sidebar-foreground" data-testid="select-city">
                   <MapPin className="h-4 w-4 text-plate" /><SelectValue />
                 </SelectTrigger>
@@ -210,7 +267,7 @@ export function FindJobs() {
 
       {!online && (
         <div className="flex items-center gap-3 rounded-xl border border-chart-4/40 bg-chart-4/10 p-3 text-sm" role="status" data-testid="banner-offline">
-          <WifiOff className="h-4 w-4 text-chart-4" />You are offline. Showing jobs saved on this device; applying still works in the pilot.
+          <WifiOff className="h-4 w-4 text-chart-4" />You are offline. Live job search and applications require an active connection.
         </div>
       )}
 
@@ -244,10 +301,26 @@ export function FindJobs() {
               action={<Button onClick={clear} data-testid="button-empty-clear">Clear filters</Button>} />
           ) : (
             <div className="grid gap-4 xl:grid-cols-2">
-              {jobs.map((j, i) => (
-                <JobCard key={j.id} job={j} index={i} saved={state.saved.includes(j.id)} appStatus={myApps.get(j.id)?.status}
-                  onToggleSave={() => { const s = actions.toggleSave(j.id); toast({ title: s ? 'Saved' : 'Removed from saved', description: j.title }); }} />
-              ))}
+              {jobs.map((j, i) => {
+                const isSaved = savedIds.includes(j.id);
+                return (
+                  <JobCard key={j.id} job={j} index={i} saved={isSaved} appStatus={myApps.get(j.id)?.status}
+                    onToggleSave={async () => {
+                      if (activeLive) {
+                        const next = await toggleLiveSavedJob(j.id, isSaved);
+                        queryClient.invalidateQueries({ queryKey: ['worker-saved-jobs', uid] });
+                        toast({ title: next ? 'Saved' : 'Removed from saved', description: j.title });
+                        return;
+                      }
+                      if (liveMode && !session) {
+                        toast({ title: 'Sign in to save jobs', description: 'Create a free worker account to bookmark jobs.' });
+                        return;
+                      }
+                      const s = actions.toggleSave(j.id);
+                      toast({ title: s ? 'Saved' : 'Removed from saved', description: j.title });
+                    }} />
+                );
+              })}
             </div>
           )}
         </div>
@@ -281,33 +354,33 @@ export function FindJobs() {
 
 export function JobDetail() {
   const { id } = useParams<{ id: string }>();
-  const { state, actions, usageToday } = usePilot();
+  const { state, actions } = usePilot();
   const { session } = useSession();
-  const [liveJob, setLiveJob] = useState<Job | null>(null);
+  const queryClient = useQueryClient();
+  const { activeLive, uid, profile: p, appsMap: myApps, savedIds, usageToday } = useWorkerLiveState();
   const { toast } = useToast();
-  const myApps = useMyApps();
   const [confirm, setConfirm] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    if (liveMode && id) {
-      getLiveJobs().then((jobs) => {
-        if (!active) return;
-        const match = jobs.find((j) => j.id === id);
-        if (match) setLiveJob(match);
-      });
-    }
-    return () => { active = false; };
-  }, [id]);
+  const { data: liveJobsData, isLoading } = useQuery({
+    queryKey: ['live-jobs'],
+    enabled: liveMode && Boolean(id),
+    queryFn: () => getLiveJobs(),
+    staleTime: 30_000,
+  });
 
-  const job = liveMode ? liveJob : state.jobs.find((j) => j.id === id);
+  const job = liveMode
+    ? (liveJobsData ?? []).find((j) => j.id === id)
+    : state.jobs.find((j) => j.id === id);
+
+  if (liveMode && isLoading && !job) {
+    return <div className="mx-auto max-w-4xl"><CardSkeleton /></div>;
+  }
 
   if (!job || (!isLiveJob(job) && !myApps.has(job.id))) {
     return <EmptyState icon={SearchX} title="Job not available" body="This job may have closed, expired or is not yet approved." action={<Link href="/" className="font-semibold text-primary underline">Back to jobs</Link>} />;
   }
   const app = myApps.get(job.id);
-  const saved = state.saved.includes(job.id);
-  const p = state.profile;
+  const saved = savedIds.includes(job.id);
 
   const doApply = async () => {
     if (!session) {
@@ -320,10 +393,10 @@ export function JobDetail() {
     if (liveMode) {
       const res = await applyToLiveJob(job.id);
       if (res.ok) {
-        actions.apply(job.id);
+        queryClient.invalidateQueries({ queryKey: ['worker-applications', uid] });
         toast({
           title: 'Application sent',
-          description: res.data?.wasExisting ? 'Already applied previously.' : 'Recorded in database via apply_to_job RPC.',
+          description: res.data?.wasExisting ? 'Already applied previously.' : 'Your application has been recorded.',
         });
       } else {
         toast({
@@ -379,7 +452,24 @@ export function JobDetail() {
             ) : (
               <Button size="lg" className="w-full" onClick={() => setConfirm(true)} data-testid="button-apply">Apply now</Button>
             )}
-            <Button variant="outline" className="w-full" onClick={() => actions.toggleSave(job.id)} data-testid="button-save-detail">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={async () => {
+                if (activeLive) {
+                  const next = await toggleLiveSavedJob(job.id, saved);
+                  queryClient.invalidateQueries({ queryKey: ['worker-saved-jobs', uid] });
+                  toast({ title: next ? 'Saved' : 'Removed from saved', description: job.title });
+                  return;
+                }
+                if (liveMode && !session) {
+                  toast({ title: 'Sign in to save jobs', description: 'Create a free worker account to bookmark jobs.' });
+                  return;
+                }
+                actions.toggleSave(job.id);
+              }}
+              data-testid="button-save-detail"
+            >
               {saved ? <><BookmarkCheck className="mr-1.5 h-4 w-4" />Saved</> : <><Bookmark className="mr-1.5 h-4 w-4" />Save for later</>}
             </Button>
             <p className="text-center font-mono text-[11px] text-muted-foreground">{usageToday}/{DAILY_LIMIT} applications today (IST)</p>
@@ -416,24 +506,21 @@ export function JobDetail() {
 
 export function SavedJobs() {
   const { state, actions } = usePilot();
-  const { session } = useSession();
-  const myApps = useMyApps();
-  const [liveSavedIds, setLiveSavedIds] = useState<string[] | null>(null);
-  const [liveJobsList, setLiveJobsList] = useState<Job[] | null>(null);
+  const queryClient = useQueryClient();
+  const { activeLive, uid, appsMap: myApps, savedIds } = useWorkerLiveState();
 
-  useEffect(() => {
-    if (liveMode && session) {
-      getLiveSavedJobs().then(setLiveSavedIds);
-      getLiveJobs().then(setLiveJobsList);
-    }
-  }, [session]);
+  const { data: liveJobsList } = useQuery({
+    queryKey: ['live-jobs'],
+    enabled: liveMode,
+    queryFn: () => getLiveJobs(),
+    staleTime: 30_000,
+  });
 
-  const savedIds = liveMode && session ? (liveSavedIds ?? []) : state.saved;
-  const poolJobs = liveMode && session ? (liveJobsList ?? []) : state.jobs;
+  const poolJobs = activeLive ? (liveJobsList ?? []) : state.jobs;
   const jobs = savedIds.map((id) => poolJobs.find((j) => j.id === id)).filter((j): j is NonNullable<typeof j> => !!j);
   return (
     <div>
-      <PageHeaderLite title="Saved jobs" sub={`${jobs.length} saved on this device`} />
+      <PageHeaderLite title="Saved jobs" sub={activeLive ? `${jobs.length} saved to your account` : `${jobs.length} saved on this device`} />
       {jobs.length === 0 ? (
         <EmptyState icon={Bookmark} title="Nothing saved yet" body="Tap the bookmark on any job to keep it here for later." action={<Link href="/" className="font-semibold text-primary underline">Browse jobs</Link>} />
       ) : (
@@ -445,9 +532,9 @@ export function SavedJobs() {
                 index={i}
                 saved
                 onToggleSave={async () => {
-                  if (liveMode && session) {
+                  if (activeLive) {
                     await toggleLiveSavedJob(j.id, true);
-                    setLiveSavedIds((prev) => (prev ? prev.filter((x) => x !== j.id) : []));
+                    queryClient.invalidateQueries({ queryKey: ['worker-saved-jobs', uid] });
                   } else {
                     actions.toggleSave(j.id);
                   }
