@@ -1,15 +1,22 @@
--- Migration 027: Pre-Deployment Security, Least-Privilege ACL & Hiring RPC Hardening
+-- Migration 027: Pre-Deployment Security, Least-Privilege ACL, Locality Privacy & Hiring RPC Hardening
 -- Target Supabase Project: jigbzsaaowtyaqhreplg
--- Safety: Strictly non-destructive (ACL tightening, RPC security hardening, read helpers).
+-- Safety: Strictly non-destructive (ACL tightening, sanitized locality column/projection,
+--         cryptographic candidate handle enforcement, RPC security hardening, read helpers).
 --         Does NOT drop data, disable RLS, reset tables, or delete existing accounts.
 
 -- ---------------------------------------------------------------------------
--- 1. Least-privilege table & function ACL tightening
+-- 1. Least-privilege table, sequence, column & function ACL tightening
 -- ---------------------------------------------------------------------------
 
 -- Remove excessive table-level grants on candidate_invitations (all writes use SECURITY DEFINER RPCs)
 revoke all on table public.candidate_invitations from public, anon, authenticated;
 grant select on table public.candidate_invitations to authenticated;
+
+-- Revoke residual anon/authenticated privileges on internal identity sequences written only by SECURITY DEFINER RPCs
+revoke all on sequence public.application_status_history_id_seq from public, anon, authenticated;
+revoke all on sequence public.audit_log_id_seq from public, anon, authenticated;
+revoke all on sequence public.employer_verification_reviews_id_seq from public, anon, authenticated;
+revoke all on sequence public.job_status_history_id_seq from public, anon, authenticated;
 
 -- Allow authenticated users to create support tickets via existing support_owner_insert RLS policy
 -- Column-scoped grant prevents forging non-open status on insert.
@@ -20,6 +27,266 @@ grant insert (opened_by, employer_id, subject, details) on table public.support_
 -- Prevent authenticated/public callers from invoking zero-admin bootstrap RPC
 revoke all on function public.bootstrap_admin(text) from public, anon, authenticated;
 grant execute on function public.bootstrap_admin(text) to postgres, service_role;
+
+-- Dedicated sanitized public locality column on workers (separates public neighbourhood from private address_line)
+alter table public.workers
+  add column if not exists locality text;
+
+-- Restore least-privilege column-scoped grants on workers and jobs
+revoke insert, update, delete, truncate on table public.workers from public, anon, authenticated;
+grant select on table public.workers to authenticated;
+grant insert (
+  user_id, full_name, phone_e164, email, photo_path, address_line, locality, city, postal_code,
+  category, experience_band, vehicle_type, has_own_vehicle, fuel_support_required,
+  discoverable, availability, updated_at
+) on table public.workers to authenticated;
+grant update (
+  full_name, phone_e164, email, photo_path, address_line, locality, city, postal_code,
+  category, experience_band, vehicle_type, has_own_vehicle, fuel_support_required,
+  discoverable, availability, updated_at
+) on table public.workers to authenticated;
+
+revoke insert, update, delete, truncate on table public.jobs from public, anon, authenticated;
+grant select on table public.jobs to authenticated;
+grant insert (
+  employer_id, created_by, title, category, description, city, area, postal_code,
+  work_address, salary_min_inr, salary_max_inr, requires_driving_licence, expires_at, state
+) on table public.jobs to authenticated;
+grant update (
+  title, category, description, city, area, postal_code, work_address,
+  salary_min_inr, salary_max_inr, requires_driving_licence, expires_at, updated_at
+) on table public.jobs to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 1b. Sanitized Candidate Locality Helpers, Backfill & Discovery Hardening
+-- ---------------------------------------------------------------------------
+
+-- Strips house/flat/street/pincode/contact patterns so raw residential addresses are never exposed publicly.
+create or replace function public.sanitize_locality(
+  p_raw text,
+  p_city text default null::text
+)
+returns text
+language sql
+immutable
+set search_path to ''
+as $function$
+  select case
+    when p_raw is null then null
+    when char_length(trim(regexp_replace(p_raw, '\s+', ' ', 'g'))) = 0 then null
+    when char_length(trim(regexp_replace(p_raw, '\s+', ' ', 'g'))) > 50 then null
+    when p_raw ~ '[@#/]' then null
+    when p_raw ~ '[0-9]{4,}' then null
+    when p_raw ~* '\m(house|h\.?no|flat|apt|apartment|plot|gali|lane|street|st\.?|khasra|floor|wing|tower|bldg|building|room|opp|opposite|near|behind|front|chowk|pin)\M' then null
+    else trim(regexp_replace(p_raw, '\s+', ' ', 'g'))
+  end;
+$function$;
+
+create or replace function public.safe_worker_locality(
+  p_city text,
+  p_locality text,
+  p_address_line text default null::text
+)
+returns text
+language sql
+immutable
+set search_path to ''
+as $function$
+  select coalesce(
+    public.sanitize_locality(p_locality, p_city),
+    public.sanitize_locality(p_address_line, p_city),
+    nullif(trim(p_city), ''),
+    'Local'
+  );
+$function$;
+
+-- Non-destructive backfill preserving genuine localities (e.g. 'Dwarka', 'Gurugram Sec 18')
+update public.workers w
+set locality = public.sanitize_locality(coalesce(w.locality, w.address_line), w.city)
+where w.locality is null
+  and coalesce(trim(w.address_line), '') <> '';
+
+create or replace function public.save_worker_profile(
+  p_full_name text,
+  p_city text,
+  p_address_line text,
+  p_experience_band text,
+  p_vehicle_type text,
+  p_has_own_vehicle boolean default false,
+  p_discoverable boolean default false,
+  p_availability text default 'immediate'::text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path to ''
+as $function$
+declare
+  v_uid uuid := auth.uid();
+  v_worker_id uuid;
+  v_sanitized_locality text;
+begin
+  if v_uid is null then
+    raise exception 'Authentication required' using errcode = '42501';
+  end if;
+
+  if char_length(trim(coalesce(p_full_name, ''))) < 2 then
+    raise exception 'Full name must be at least 2 characters';
+  end if;
+
+  v_sanitized_locality := public.sanitize_locality(p_address_line, p_city);
+
+  insert into public.user_accounts (user_id, account_state)
+  values (v_uid, 'active')
+  on conflict (user_id) do nothing;
+
+  insert into public.workers (
+    user_id, full_name, city, address_line, locality, experience_band,
+    vehicle_type, has_own_vehicle, discoverable, availability, account_state
+  ) values (
+    v_uid,
+    trim(p_full_name),
+    p_city,
+    nullif(trim(p_address_line), ''),
+    v_sanitized_locality,
+    p_experience_band,
+    p_vehicle_type,
+    coalesce(p_has_own_vehicle, false),
+    coalesce(p_discoverable, false),
+    coalesce(p_availability, 'immediate'),
+    'active'
+  )
+  on conflict (user_id) do update set
+    full_name = excluded.full_name,
+    city = excluded.city,
+    address_line = excluded.address_line,
+    locality = coalesce(excluded.locality, public.sanitize_locality(excluded.address_line, excluded.city)),
+    experience_band = excluded.experience_band,
+    vehicle_type = excluded.vehicle_type,
+    has_own_vehicle = excluded.has_own_vehicle,
+    discoverable = excluded.discoverable,
+    availability = excluded.availability,
+    updated_at = clock_timestamp()
+  returning id into v_worker_id;
+
+  return v_worker_id;
+end;
+$function$;
+
+create or replace function public.discover_workers(
+  p_city text default null::text,
+  p_area text default null::text,
+  p_category text default null::text,
+  p_experience text default null::text,
+  p_limit integer default 20,
+  p_offset integer default 0
+)
+returns table(
+  candidate_handle text,
+  city text,
+  area text,
+  category text,
+  experience_band text,
+  vehicle_type text,
+  has_own_vehicle boolean
+)
+language plpgsql
+stable
+security definer
+set search_path to ''
+as $function$
+declare
+  v_city_clean text := nullif(trim(regexp_replace(coalesce(p_city, ''), '\s+', ' ', 'g')), '');
+  v_area_clean text := nullif(trim(regexp_replace(coalesce(p_area, ''), '\s+', ' ', 'g')), '');
+begin
+  if auth.uid() is null or not exists (
+    select 1
+    from public.employer_memberships m
+    join public.employers e on e.id = m.employer_id
+    join public.user_accounts u on u.user_id = m.user_id
+    where m.user_id = auth.uid()
+      and m.state = 'active'
+      and e.verification_state = 'verified'
+      and u.account_state = 'active'
+  ) then
+    raise exception 'Active verified employer membership required' using errcode = '42501';
+  end if;
+
+  if p_limit not between 1 and 50 or p_offset < 0 then
+    raise exception 'Invalid pagination';
+  end if;
+
+  if lower(coalesce(v_city_clean, '')) in ('all', 'all regions') then
+    v_city_clean := null;
+  end if;
+  if lower(coalesce(v_area_clean, '')) in ('all', 'all localities') then
+    v_area_clean := null;
+  end if;
+
+  return query
+  select
+    encode(extensions.digest(w.id::text, 'sha256'), 'hex') as candidate_handle,
+    coalesce(nullif(trim(w.city), ''), 'India') as city,
+    public.safe_worker_locality(w.city, w.locality, w.address_line) as area,
+    w.category,
+    w.experience_band,
+    w.vehicle_type,
+    w.has_own_vehicle
+  from public.workers w
+  join public.user_accounts u on u.user_id = w.user_id
+  where w.discoverable = true
+    and w.account_state = 'active'
+    and u.account_state = 'active'
+    and (
+      v_city_clean is null
+      or lower(coalesce(w.city, '')) = lower(left(v_city_clean, 100))
+      or lower(coalesce(w.city, '')) like '%' || lower(left(v_city_clean, 100)) || '%'
+      or lower(public.safe_worker_locality(w.city, w.locality, w.address_line)) like '%' || lower(left(v_city_clean, 100)) || '%'
+    )
+    and (
+      v_area_clean is null
+      or lower(public.safe_worker_locality(w.city, w.locality, w.address_line)) like '%' || lower(left(v_area_clean, 100)) || '%'
+      or lower(coalesce(w.city, '')) = lower(left(v_area_clean, 100))
+    )
+    and (p_category is null or p_category = '' or w.category = p_category or w.category is null)
+    and (p_experience is null or p_experience = '' or w.experience_band = p_experience)
+  order by w.updated_at desc nulls last, w.created_at desc
+  limit p_limit offset p_offset;
+end;
+$function$;
+
+-- Drop redundant legacy 5-arg overloads so PostgREST resolves discover_workers / discover_candidates unambiguously
+drop function if exists public.discover_workers(text, text, text, integer, integer);
+drop function if exists public.discover_candidates(text, text, text, integer, integer);
+
+create or replace function public.discover_candidates(
+  p_city text default null::text,
+  p_area text default null::text,
+  p_category text default null::text,
+  p_experience text default null::text,
+  p_limit integer default 20,
+  p_offset integer default 0
+)
+returns table(
+  candidate_handle text,
+  city text,
+  area text,
+  category text,
+  experience_band text,
+  vehicle_type text,
+  has_own_vehicle boolean
+)
+language plpgsql
+stable
+security definer
+set search_path to ''
+as $function$
+begin
+  return query
+  select d.candidate_handle, d.city, d.area, d.category, d.experience_band, d.vehicle_type, d.has_own_vehicle
+  from public.discover_workers(p_city, p_area, p_category, p_experience, p_limit, p_offset) d;
+end;
+$function$;
 
 -- ---------------------------------------------------------------------------
 -- 2. Harden invitation RPCs (verified employer gate + accurate status history)
@@ -43,13 +310,15 @@ declare
   v_invitation_id uuid;
   v_worker_user_id uuid;
   v_employer_name text;
+  v_normalized_handle text;
 begin
   if v_uid is null then
     raise exception 'Authentication required' using errcode = '42501';
   end if;
 
-  if p_candidate_handle is null or char_length(trim(p_candidate_handle)) = 0 then
-    raise exception 'Candidate identifier is required';
+  v_normalized_handle := lower(trim(coalesce(p_candidate_handle, '')));
+  if v_normalized_handle !~ '^[0-9a-f]{64}$' then
+    raise exception 'Invalid cryptographic candidate handle';
   end if;
 
   -- Verify caller is an active member of a VERIFIED employer with an active user account
@@ -77,17 +346,15 @@ begin
     end if;
   end if;
 
-  -- Resolve discoverable active worker by handle
+  -- Resolve discoverable active worker exclusively by collision-resistant SHA-256 handle
   select w.id, w.user_id
   into v_worker_id, v_worker_user_id
   from public.workers w
-  where (
-    encode(extensions.digest(w.id::text, 'sha256'), 'hex') = p_candidate_handle
-    or w.id::text = p_candidate_handle
-    or ('cand-' || substr(w.id::text, 1, 8)) = p_candidate_handle
-  )
+  join public.user_accounts u on u.user_id = w.user_id
+  where encode(extensions.digest(w.id::text, 'sha256'), 'hex') = v_normalized_handle
     and w.discoverable = true
     and w.account_state = 'active'
+    and u.account_state = 'active'
   limit 1;
 
   if v_worker_id is null then
@@ -109,7 +376,7 @@ begin
   insert into public.candidate_invitations (
     employer_id, worker_id, candidate_handle, job_id, message, status
   ) values (
-    v_employer_id, v_worker_id, p_candidate_handle, p_job_id, nullif(left(trim(p_message), 500), ''), 'pending'
+    v_employer_id, v_worker_id, v_normalized_handle, p_job_id, nullif(left(trim(p_message), 500), ''), 'pending'
   ) returning id into v_invitation_id;
 
   insert into public.notifications (user_id, kind, payload)
@@ -211,7 +478,7 @@ begin
     v_app.worker_id,
     v_job.id,
     p_application_id,
-    'cand-' || substr(v_app.worker_id::text, 1, 8),
+    encode(extensions.digest(v_app.worker_id::text, 'sha256'), 'hex'),
     nullif(left(trim(p_message), 500), ''),
     'pending'
   )
@@ -440,7 +707,7 @@ begin
     'FW-' || upper(substr(encode(extensions.digest(w.id::text, 'sha256'), 'hex'), 1, 6)) as candidate_code,
     encode(extensions.digest(w.id::text, 'sha256'), 'hex') as candidate_handle,
     coalesce(w.city, 'India') as worker_city,
-    coalesce(nullif(trim(w.address_line), ''), coalesce(w.city, 'Local')) as worker_area,
+    public.safe_worker_locality(w.city, w.locality, w.address_line) as worker_area,
     coalesce(w.experience_band, 'fresher') as experience_band,
     coalesce(w.vehicle_type, 'none') as vehicle_type,
     coalesce(w.has_own_vehicle, false) as has_own_vehicle,
@@ -650,3 +917,18 @@ grant execute on function public.set_worker_discoverability(boolean) to authenti
 
 revoke all on function public.admin_update_support_ticket(uuid, public.ticket_state, text) from public, anon;
 grant execute on function public.admin_update_support_ticket(uuid, public.ticket_state, text) to authenticated, service_role;
+
+revoke all on function public.sanitize_locality(text, text) from public, anon;
+grant execute on function public.sanitize_locality(text, text) to authenticated, service_role;
+
+revoke all on function public.safe_worker_locality(text, text, text) from public, anon;
+grant execute on function public.safe_worker_locality(text, text, text) to authenticated, service_role;
+
+revoke all on function public.save_worker_profile(text, text, text, text, text, boolean, boolean, text) from public, anon;
+grant execute on function public.save_worker_profile(text, text, text, text, text, boolean, boolean, text) to authenticated, service_role;
+
+revoke all on function public.discover_workers(text, text, text, text, integer, integer) from public, anon;
+grant execute on function public.discover_workers(text, text, text, text, integer, integer) to authenticated, service_role;
+
+revoke all on function public.discover_candidates(text, text, text, text, integer, integer) from public, anon;
+grant execute on function public.discover_candidates(text, text, text, text, integer, integer) to authenticated, service_role;

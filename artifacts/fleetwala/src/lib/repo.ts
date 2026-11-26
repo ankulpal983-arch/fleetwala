@@ -243,7 +243,7 @@ export async function getLiveWorkerProfile(): Promise<WorkerProfile | null> {
   return {
     first_name: data.full_name ? data.full_name.split(' ')[0] : '',
     city: data.city || '',
-    area: data.address_line || '',
+    area: data.locality || data.address_line || '',
     experience: fromDbExperience(data.experience_band),
     vehicle: fromDbVehicle(data.vehicle_type),
     own_vehicle: data.has_own_vehicle || false,
@@ -285,18 +285,18 @@ export async function saveLiveWorkerProfile(profile: Partial<WorkerProfile>): Pr
     console.warn('[Repo] save_worker_profile RPC failed:', err);
   }
 
-  // 2. Direct table upsert fallback with RLS ownership
+  // 2. Direct table upsert fallback with RLS ownership (defaults account_state cleanly in DB)
   const payload = {
     user_id: user.id,
     full_name: fullName,
     city: profile.city,
     address_line: profile.area,
+    locality: profile.area,
     experience_band: expBand,
     vehicle_type: vehType,
     has_own_vehicle: profile.own_vehicle ?? false,
     discoverable: profile.discoverable ?? false,
     availability: profile.available ? 'immediate' : 'unavailable',
-    account_state: 'active' as const,
   };
 
   const { error } = await c.from('workers').upsert(payload, { onConflict: 'user_id' });
@@ -849,7 +849,7 @@ export async function getLiveEmployerApplicants(employerId?: string): Promise<Li
     const latestDbStatus = history.length > 0 ? history[history.length - 1].new_status : (item.status || 'applied');
     const uiStatus = fromDbAppStatus(latestDbStatus);
     const worker = item.worker;
-    const candidateCode = worker?.id ? `FW-${worker.id.slice(0, 6).toUpperCase()}` : 'FW-CANDIDATE';
+    const candidateCode = 'FW-CANDIDATE';
     const workerSummary = worker
       ? `${worker.city || 'Local'} · ${fromDbExperience(worker.experience_band)} · ${fromDbVehicle(worker.vehicle_type)}`
       : 'Applied candidate (contact protected)';
@@ -857,7 +857,7 @@ export async function getLiveEmployerApplicants(employerId?: string): Promise<Li
     return {
       id: item.id,
       job_id: item.job_id,
-      candidate_id: worker?.id || 'candidate',
+      candidate_id: 'protected',
       status: uiStatus,
       created_at: item.created_at,
       history: history.length > 0

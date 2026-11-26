@@ -111,14 +111,28 @@ describe('Pre-Deployment Security, Privacy, Location & Workflow Regression Audit
     assert.equal(renderYaml.includes('fleetwala.vercel.app'), false);
   });
 
-  it('7. Migration 027 exists with least-privilege SQL & RPC hardening', () => {
+  it('7. Migration 027 exists with least-privilege SQL, sanitized locality & cryptographic handle hardening', () => {
     const mig027 = readSrc('../../supabase/migrations/027_predeployment_security_and_rls_hardening.sql');
     assert.ok(mig027.includes('revoke all on table public.candidate_invitations from public, anon, authenticated;'));
     assert.ok(mig027.includes('revoke all on function public.bootstrap_admin(text) from public, anon, authenticated;'));
+    assert.ok(mig027.includes('revoke all on sequence public.audit_log_id_seq from public, anon, authenticated;'));
+    assert.ok(mig027.includes('sanitize_locality'));
+    assert.ok(mig027.includes('safe_worker_locality'));
+    assert.ok(mig027.includes('^[0-9a-f]{64}$'), 'create_candidate_invitation must require 64-char SHA-256 hex handles');
+    assert.equal(mig027.includes('w.id::text = p_candidate_handle'), false, 'Raw w.id fallback matching must be removed');
+    assert.equal(mig027.includes("'cand-' || substr("), false, 'Predictable cand-<8-char-uuid> handle generation must be removed');
     assert.ok(mig027.includes('get_employer_applicants'));
     assert.ok(mig027.includes('get_worker_applications'));
     assert.ok(mig027.includes('set_worker_discoverability'));
     assert.ok(mig027.includes('admin_update_support_ticket'));
+
+    const prodInit = readSrc('../../supabase/production/001_production_baseline_schema.sql');
+    assert.ok(prodInit.includes('enable row level security'));
+    assert.equal(/11111111-1111-1111-1111-111111111111|5733aa5f-ee59|6e7c9a06-b7ba|af42f70c-6b4f|761d0d18-99ed|800d0fd8-ff46/i.test(prodInit), false, 'Production baseline must contain zero staging UUIDs');
+    assert.equal(/ankulpalwork@gmail\.com|fleetwala\.internal|admin_grant_staging_job_waiver/i.test(prodInit), false, 'Production baseline must contain zero staging emails or staging waivers');
+
+    const repoSrc = readSrc('src/lib/repo.ts');
+    assert.equal(repoSrc.includes('worker?.id ? `FW-${worker.id.slice'), false, 'Client repo fallback must never derive codes from raw worker UUID');
   });
 
   it('8. RLS Negative: Anon cannot read private tables or mutate candidate_invitations / support_tickets', async () => {
